@@ -10,8 +10,8 @@ measured at about 85% of the time for a player choosing plausible words without
 thinking ahead. So you take one back, and the words below it move up onto
 different squares, and everything rescores.
 
-Finish inside five quiet minutes and you keep what is left of them as bonus
-points. There is no clock on screen.
+Finish inside five quiet minutes and you keep a point for every five seconds
+left, up to 60. There is no clock on screen.
 
 Live at **https://hexadec.carlosfandango.net/** · repo
 `github.com/cloudcmo/hexadec` · local `~/code/Hexa`
@@ -69,8 +69,15 @@ word and then remove it. `npm run ui` asserts this by placing and removing the
 same word ten times.
 
 **The clock** is five minutes, hidden, started on the first tap and paused when
-the tab is. What is left of it is added as points. Using *Show me a word*
+the tab is. What is left of it scores **one point per five seconds**, so the
+bonus tops out at 60 against a grid score of 100 to 250. Using *Show me a word*
 forfeits it entirely.
+
+It was a point per second to begin with, which paid up to 300 and made the
+clock worth more than the puzzle. Shortening the clock to three minutes would
+have paid up to 180 and *also* put a hurry on a game meant to be unhurried;
+scoring the same five minutes more cheaply fixes the proportion and leaves the
+pace alone.
 
 ---
 
@@ -242,8 +249,8 @@ greyscale rather than relying on colour at all.
   the end of the game calls `GuffBar.completedToday`. The node is *moved* into
   the end card rather than re-rendered, because a second `completedToday` would
   report the day twice.
-- **The league** — submits grid score + time bonus, `max: 600`, display
-  `"216 · 72%"`.
+- **The league** — submits grid score + time bonus, `max: 360`, display
+  `"166 · 58%"`.
 - **The docket, the hub and the league page** need changes in *other* repos
   before any of this shows up. See the deploy notes below.
 
@@ -264,11 +271,8 @@ greyscale rather than relying on colour at all.
 
 ## Still open
 
-- The time bonus is one point per second and can reach 300, which is larger
-  than a typical grid score. In practice nobody finds four interlocking words
-  in under two minutes, so real bonuses land around 0–150 — but it is worth
-  watching in the first weeks of `avgSeconds` from `/api/stats`, and capping if
-  speed starts beating word-craft.
 - The clock starts on the first tap, so it is possible to study the tiles for
   a while before starting. Self-limiting, and kind to a thoughtful player.
 - No archive of past days, deliberately: the daily stays scarce.
+- The clock starts on the first tap, so it is possible to study the tiles before
+  starting. Self-limiting, and kind to a thoughtful player.

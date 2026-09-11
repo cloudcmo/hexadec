@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
-<title>Hexadec — sixteen tiles, four words, one grid</title>
+<title>Hexadec — four the win</title>
 <meta name="description" content="A daily word puzzle. Sixteen lettered tiles hold four four-letter words. Find the wrong four and you will be left holding nonsense.">
 <meta name="theme-color" content="#c8763a">
 <link rel="manifest" href="manifest.webmanifest">
@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Hexadec">
 <meta property="og:title" content="Hexadec">
-<meta property="og:description" content="Sixteen tiles. Four words. One grid. A new one every morning.">
+<meta property="og:description" content="Four the win. Sixteen tiles, four words, one grid, every morning.">
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -235,6 +235,17 @@ input[type=email]{width:100%;padding:11px 12px;border-radius:10px;border:1px sol
   background:#fff;font:inherit;margin-bottom:8px}
 #guffbar-slot{margin-top:10px}
 .trimnote{font-size:12px;color:var(--ink-soft);text-align:center;padding:8px}
+/* The instructions are there for the one person in twenty who wants them and
+   invisible to everyone else. Nobody arrives at a daily puzzle hoping to read. */
+.rules{margin-top:2px}
+.rules summary{list-style:none;cursor:pointer;text-align:center;padding:7px;
+  font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft)}
+.rules summary::-webkit-details-marker{display:none}
+.rules summary::after{content:" \25BE"}
+.rules[open] summary::after{content:" \25B4"}
+.rules summary:hover{color:var(--ink)}
+.rules .sheet{margin-top:2px}
+.rules .sheet p:last-of-type{margin-bottom:0}
 footer{text-align:center;font-size:11.5px;color:var(--ink-soft);padding:6px 0 2px;line-height:1.7}
 footer a{color:var(--ink-soft)}
 
@@ -255,7 +266,7 @@ footer a{color:var(--ink-soft)}
   <header>
     <div>
       <div class="brand">Hex<em>adec</em></div>
-      <div class="sub" id="dateline">&nbsp;</div>
+      <div class="sub">Four the win</div>
     </div>
     <div class="scorepill"><small>Score</small><span id="score">0</span></div>
   </header>
@@ -284,31 +295,32 @@ footer a{color:var(--ink-soft)}
     </div>
   </div>
 
-  <div class="sheet" id="rules">
-    <h2>How it goes</h2>
-    <p>Sixteen tiles. Hidden among them are four four-letter words that use every
-    tile exactly. Build one and it lands on the next row down.</p>
-    <ul>
-      <li>Plenty of words can be made. Only some sets of four use up all sixteen tiles, so three good words can still leave you holding nonsense.</li>
-      <li>Tap any letter of a word already on the grid to take it back. The words below it move up.</li>
-      <li>Columns that happen to read as a word score a bonus too, top to bottom. A full four-letter column scores double.</li>
-      <li>Finish quickly and you keep what is left of five quiet minutes as bonus points. There is no clock on screen.</li>
-    </ul>
-    <div class="key">
-      <span class="k-dl">2×L double letter</span>
-      <span class="k-tl">3×L triple letter</span>
-      <span class="k-dw">2×W double word</span>
-      <span class="k-tw">3×W triple word</span>
-    </div>
-    <p class="muted">A premium square counts on the turn you cover it, and it counts for the
-    column too. Later words score their own squares, not yours.</p>
-    <button class="btn" id="btnHideRules">Got it</button>
-  </div>
-
   <div id="guffbar-home"><div id="guffbar-slot"></div></div>
 
+  <details class="rules" id="rules">
+    <summary>How to play</summary>
+    <div class="sheet">
+      <p>Sixteen tiles. Hidden among them are four four-letter words that use every
+      tile exactly. Build one and it lands on the next row down.</p>
+      <ul>
+        <li>Plenty of words can be made. Only some sets of four use up all sixteen tiles, so three good words can still leave you holding nonsense.</li>
+        <li>Tap any letter of a word already on the grid to take it back. The words below it move up.</li>
+        <li>Columns that happen to read as a word score a bonus too, top to bottom. A full four-letter column scores double.</li>
+        <li>Finish inside five quiet minutes and you keep a point for every five seconds left, up to 60. There is no clock on screen.</li>
+      </ul>
+      <div class="key">
+        <span class="k-dl">2×L double letter</span>
+        <span class="k-tl">3×L triple letter</span>
+        <span class="k-dw">2×W double word</span>
+        <span class="k-tw">3×W triple word</span>
+      </div>
+      <p class="muted">A premium square counts on the turn you cover it, and it counts for the
+      column too. Later words score their own squares, not yours.</p>
+    </div>
+  </details>
+
   <footer>
-    <a href="#" id="linkRules">How to play</a> ·
+    <span id="dateline">&nbsp;</span> ·
     <a href="#" id="linkHome">Add to home screen</a><br>
     A <a href="https://guff.carlosfandango.net/">Guff</a> game
   </footer>

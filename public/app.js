@@ -20,8 +20,17 @@ import { FOURS, THREES, TWOS } from "./words.js";
 import { TILES, LAYOUTS, MAXES, PARS, dayIndex } from "./days.js";
 
 const SITE_URL = "https://hexadec.carlosfandango.net";
-const FULL_SECONDS = 300;          // the quiet five minutes
-const LEAGUE_MAX = 600;            // words (~300 ceiling) plus the clock (300)
+/* The quiet five minutes, scored at a point per five seconds, so the clock
+ * tops out at 60 against a grid score of 100 to 250.
+ *
+ * It was a point per second, and that was wrong: a fast finish paid up to 300,
+ * which is more than the puzzle itself, and Hexadec would have quietly become a
+ * race. Shortening the clock instead would have paid up to 180 and ALSO put a
+ * hurry on a game that is meant to be unhurried. Scoring the same five minutes
+ * more cheaply fixes the proportion and leaves the pace alone. */
+const FULL_SECONDS = 300;
+const BONUS_PER = 5;               // seconds per bonus point, so the clock tops out at 60
+const LEAGUE_MAX = 360;            // grid (~300 ceiling) plus the clock (60)
 
 const FOUR_SET = new Set(FOURS.split(" "));
 const WORD_SET = new Set([...FOUR_SET, ...THREES.split(" "), ...TWOS.split(" ")]);
@@ -270,7 +279,8 @@ function stopClock() {
 function elapsedMs() { return S.ms + (S.running ? Date.now() - S.t0 : 0); }
 function timeBonus() {
   if (S.helped) return 0;
-  return Math.max(0, FULL_SECONDS - Math.floor(elapsedMs() / 1000));
+  const left = Math.max(0, FULL_SECONDS - Math.floor(elapsedMs() / 1000));
+  return Math.floor(left / BONUS_PER);
 }
 
 function stage(id) {
@@ -393,20 +403,43 @@ function completable(counts, list, depth) {
 }
 
 function showMeAWord() {
-  const { left, counts } = remainingCounts();
-  const list = E.makeableWords(left, FOUR_LIST);
-  const need = 4 - S.rows.length;
-  const pick = list.find((w) => completable(minus(counts, w), list, need - 1));
-  if (!pick) { $("vnote").className = "bad"; $("vnote").textContent = "Nothing fits — take a word back."; return; }
+  /* The moment a player most needs this is the moment it is hardest to give:
+     three words down and the last four tiles spelling nothing. There is no word
+     to suggest for that row, and an earlier version simply said "nothing fits,
+     take a word back" — which is both obvious and unhelpful, because it does
+     not say WHICH. So it backs up for them, one row at a time, until there is a
+     word that leaves a way home. Every shipped day is solvable from an empty
+     grid, so this always terminates with a suggestion. */
+  let removed = 0;
+  let pick = null;
+  while (true) {
+    const { left, counts } = remainingCounts();
+    const list = E.makeableWords(left, FOUR_LIST);
+    const need = 4 - S.rows.length;
+    pick = list.find((w) => completable(minus(counts, w), list, need - 1));
+    if (pick || !S.rows.length) break;
+    S.rows.pop();
+    S.takebacks++;
+    removed++;
+  }
   S.helped = true;
   S.staged = [];
+  if (!pick) {   /* cannot happen with a generated day; say something true anyway */
+    repaint();
+    $("vnote").className = "bad";
+    $("vnote").textContent = "Nothing fits these tiles.";
+    return;
+  }
   const used = new Set(S.rows.flatMap((r) => r.ids));
   for (const ch of pick) {
     const t = S.tiles.find((x) => x.ch === ch && !used.has(x.id) && !S.staged.includes(x.id));
     if (t) S.staged.push(t.id);
   }
   repaint();
-  $("vnote").innerHTML = "A word that still leaves a way home. No time bonus now.";
+  $("vnote").className = "";
+  $("vnote").innerHTML = removed
+    ? `Took back ${removed} word${removed > 1 ? "s" : ""}. This one leaves a way home.`
+    : "This one leaves a way home. No time bonus now.";
   save();
 }
 
@@ -492,7 +525,7 @@ function shareText() {
   const pct = Math.round(words / S.max * 100);
   const bits = [
     `Hexadec ${nice} · ${(words + bonus).toLocaleString()}`,
-    `${words} on the grid${bonus ? ` + ${bonus} left on the clock` : ""} · ${pct}% of the best possible`,
+    `${words} on the grid${bonus ? ` + ${bonus} on the clock` : ""} · ${pct}% of the best possible`,
     "",
     shareArt(),
   ];
@@ -534,32 +567,31 @@ function showCard() {
 
   const comment =
     pct >= 90 ? "Very nearly the best there was." :
-    pct >= 78 ? "That is a strong line." :
-    pct >= 65 ? "Comfortably above a careful guess." :
-    pct >= 50 ? "Solid. There was more in it." :
-    "There was a good deal more in those tiles.";
+    pct >= 78 ? "A strong line." :
+    pct >= 65 ? "Better than a careful guess." :
+    pct >= 50 ? "Solid, though more was in it." :
+    "Plenty left in those tiles.";
 
   $("cardBody").innerHTML = `
     <h1>Hexadec</h1>
     <div class="muted">${new Date(S.date + "T12:00:00").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}</div>
     <div class="bigscore">${total.toLocaleString()}</div>
     <div class="breakdown">
-      <b>${words}</b> on the grid${bonus ? ` + <b>${bonus}</b> left on the clock` : ""}
+      <b>${words}</b> on the grid${bonus ? ` + <b>${bonus}</b> for the time left` : ""}
       ${S.helped ? '<br><span class="muted">Nudged, so no time bonus.</span>' : ""}
       <br>Finished in ${mm}:${ss}${S.takebacks ? ` · ${S.takebacks} take-back${S.takebacks > 1 ? "s" : ""}` : ""}
     </div>
     <div class="meter"><i style="width:${Math.min(100, pct)}%"></i></div>
-    <div class="breakdown"><b>${pct}%</b> of the best possible ${S.max} on these tiles. ${comment}
-      <br><span class="muted">A player taking the highest-scoring word in front of them every time
-      would have finished on ${S.par}.</span></div>
+    <div class="breakdown"><b>${pct}%</b> of the best possible ${S.max}.<br>${comment}</div>
     <div class="wordlist">${rowLines}</div>
     ${downs.length ? `<div class="muted" style="margin-top:6px">${downs.length} column word${downs.length > 1 ? "s" : ""}${fulls.length ? `, ${fulls.length} of them the full four` : ""}.</div>` : '<div class="muted" style="margin-top:6px">No columns came good. That is where the points hide.</div>'}
     <div class="row-btns" style="margin-top:14px">
-      <button class="btn primary" id="btnShare">Share</button>
+      <button class="btn primary" id="btnShare">Share score</button>
       <button class="btn small" id="btnBest">Best line</button>
     </div>
     <div id="bestOut"></div>
     <div id="endBar"></div>
+    <p class="trimnote" id="endHome"></p>
     <div class="sheet" style="margin-top:14px;box-shadow:none">
       <h2>One email a week</h2>
       <p class="muted">Friday mornings: the week's best from Hexadec and the rest of the Guff games. Never more.</p>
@@ -570,6 +602,13 @@ function showCard() {
     <div class="trimnote" id="nextIn"></div>
   `;
   $("overlay").classList.add("on");
+  /* The one place the note is worth making is where people have just finished
+     and are deciding whether this is a thing they do every morning. Same line
+     as the rest of the family. */
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  $("endHome").innerHTML = ios
+    ? "Add Hexadec to your home screen: share button → <b>Add to Home Screen</b>. It becomes an app. No shop, no fee, no fuss."
+    : "Add Hexadec to your home screen: ⋮ menu → <b>Add to Home screen</b>. It becomes an app. No shop, no fee, no fuss.";
   $("btnShare").addEventListener("click", doShare);
   $("btnBest").addEventListener("click", revealBest);
   $("subForm").addEventListener("submit", subscribe);
@@ -696,11 +735,6 @@ async function subscribe(ev) {
 /* ---------------------------------------------------------------------------
  * Boot
  * ------------------------------------------------------------------------- */
-function showRules(on) {
-  $("rules").style.display = on ? "" : "none";
-  try { if (!on) localStorage.setItem("hexadec-rules-seen", "1"); } catch (e) {}
-}
-
 function homeScreenCard() {
   const ios = /iPad|iPhone|iPod/.test(navigator.userAgent);
   $("cardBody").innerHTML = `
@@ -726,13 +760,9 @@ function boot() {
   fit();
   buildBoard();
 
-  const resumed = restore();
+  restore();
   $("dateline").textContent = new Date(S.date + "T12:00:00")
     .toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
-
-  let seen = false;
-  try { seen = !!localStorage.getItem("hexadec-rules-seen"); } catch (e) {}
-  showRules(!seen && !resumed);
 
   repaint();
 
@@ -740,8 +770,6 @@ function boot() {
   $("btnClear").addEventListener("click", clearStage);
   $("btnMix").addEventListener("click", mix);
   $("btnStuck").addEventListener("click", showMeAWord);
-  $("btnHideRules").addEventListener("click", () => showRules(false));
-  $("linkRules").addEventListener("click", (e) => { e.preventDefault(); showRules(true); });
   $("linkHome").addEventListener("click", (e) => { e.preventDefault(); homeScreenCard(); });
   $("btnClose").addEventListener("click", () => {
     $("overlay").classList.remove("on");

@@ -43,7 +43,6 @@ for (const vp of VIEWPORTS) {
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(BASE, { waitUntil: "networkidle" });
-  await page.click("#btnHideRules").catch(() => {});
   await page.waitForTimeout(120);
 
   const box = await page.evaluate(() => {
@@ -53,13 +52,17 @@ for (const vp of VIEWPORTS) {
       h: window.innerHeight, cells: document.querySelectorAll("#board .cell").length,
       tiles: document.querySelectorAll("#tray .tile").length,
       scrollW: document.documentElement.scrollWidth, clientW: document.documentElement.clientWidth,
+      rulesOpen: document.getElementById("rules").open,
+      tagline: (document.querySelector(".sub") || {}).textContent,
     };
   });
   console.log(`  ${vp.name}`);
   ok("   16 cells and 16 tiles", box.cells === 16 && box.tiles === 16, `got ${box.cells}/${box.tiles}`);
+  ok("   the tagline is there", box.tagline === "Four the win", String(box.tagline));
   ok("   tray on screen", box.tray > 0 && box.tray <= box.h + 1, `tray bottom ${Math.round(box.tray)} of ${box.h}`);
   ok("   Place button on screen", box.play > 0 && box.play <= box.h + 1, `button bottom ${Math.round(box.play)} of ${box.h}`);
   ok("   no sideways scroll", box.scrollW <= box.clientW + 1, `${box.scrollW} > ${box.clientW}`);
+  ok("   the instructions stay shut until asked for", !box.rulesOpen);
   ok("   no page errors", errors.length === 0, errors.join(" | "));
   await page.close();
 }
@@ -71,7 +74,6 @@ console.log("\n2. Placing, taking back, and the score");
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(BASE, { waitUntil: "networkidle" });
-  await page.click("#btnHideRules").catch(() => {});
 
   /* find a word the rack can make, straight from the game's own engine */
   const first = await page.evaluate(() => {
@@ -141,7 +143,6 @@ console.log("\n3. A full game, the end card, and a reload");
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(BASE, { waitUntil: "networkidle" });
-  await page.click("#btnHideRules").catch(() => {});
 
   const done = await page.evaluate(() => {
     const hx = window.__hx, { S, E } = hx;
