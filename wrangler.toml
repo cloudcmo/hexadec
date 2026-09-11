@@ -1,0 +1,41 @@
+name = "hexadec"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+# ---------------------------------------------------------------------------
+# The only thing that can break Hexadec is running out of days. The table in
+# public/days.js is finite and only a laptop can refill it, so this cron reads
+# the table every morning and emails ALERT_EMAIL once there are fewer than six
+# weeks left. Cheap: no API key, no model call, one asset read.
+# ---------------------------------------------------------------------------
+[triggers]
+crons = ["35 6 * * *"]
+
+# ---------------------------------------------------------------------------
+# D1 (play stats). The Worker runs happily without it — /api/played just
+# no-ops — so `wrangler dev` with no binding is fine.
+# Create with:  npx wrangler d1 create hexadec
+# then paste the id below and run:  npm run db:remote
+# ---------------------------------------------------------------------------
+[[d1_databases]]
+binding = "DB"
+database_name = "hexadec"
+database_id = "bd200f0a-4ba1-45a0-80aa-4393e51da51a"
+
+[vars]
+ALERT_EMAIL = "carl@mesnerlyons.com"
+
+# Secrets (set with `npx wrangler secret put NAME`):
+#   RESEND_API_KEY     — the shared full-access key (games-full-access)
+#   RESEND_SEGMENT_ID  — 90610922-0511-40a1-a3d1-2c645d992210 (shared Friday segment)
+#   ADMIN_TOKEN        — any long random string (unlocks /api/stats);
+#                        mirror it on the PQD Netlify site as HEXADEC_ADMIN_TOKEN
+#
+# Custom domain: hexadec.carlosfandango.net, added in the CLOUDFLARE DASHBOARD
+# (Worker → Settings → Domains & Routes → Add → Custom domain). Deliberately
+# NOT declared here — a routes block and the dashboard fight over route
+# ownership. Same arrangement as Spellbound and Guffinoes.

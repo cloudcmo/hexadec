@@ -1,0 +1,7 @@
+node_modules/
+.wrangler/
+.dev.vars
+.admin-token
+.DS_Store
+tmp/
+shot-*.png

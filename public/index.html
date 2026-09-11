@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Hexadec — sixteen tiles, four words, one grid</title>
+<meta name="description" content="A daily word puzzle. Sixteen lettered tiles hold four four-letter words. Find the wrong four and you will be left holding nonsense.">
+<meta name="theme-color" content="#c8763a">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Hexadec">
+<meta property="og:title" content="Hexadec">
+<meta property="og:description" content="Sixteen tiles. Four words. One grid. A new one every morning.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ===========================================================================
+   Hexadec
+   Cream tiles on a tablecloth. The board is the warm middle of the screen and
+   everything else gets out of its way.
+
+   Sizing is driven by --cell, set in JS from the actual viewport, because the
+   one thing that must never happen on a phone is the tray sliding under the
+   fold at the moment the player needs it.
+   ========================================================================= */
+:root{
+  --ink:#2b2118;
+  --ink-soft:#6b5c4c;
+  --cream:#fbf5e9;
+  --cream-edge:#e4d6bc;
+  --board:#f2c9a0;
+  --board-edge:#c8763a;
+  --board-line:#e0a877;
+  --accent:#c8763a;
+  --good:#1c7c54;
+  --bad:#a8321e;
+
+  /* Premium squares. Colour-blind safety here is not the palette alone —
+     every premium square also carries its own label, so the board reads
+     correctly in greyscale. The two families are cool (letter bonuses) and
+     warm (word bonuses), and within each family the pair separates by
+     lightness, not hue. Deliberately nothing like the blue/pink/red of the
+     famous board. */
+  --dl:#a8d5ca; --dl-ink:#0a3f38;
+  --tl:#0f6e63; --tl-ink:#eafaf6;
+  --dw:#f2c879; --dw-ink:#5a3c08;
+  --tw:#6b3f7a; --tw-ink:#f7ecfa;
+
+  --cell:64px;
+  --gap:6px;
+  --tile-r:9px;
+  --safe-b:env(safe-area-inset-bottom,0px);
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:"Outfit",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  color:var(--ink);
+  background:#e8dcc6;
+  -webkit-font-smoothing:antialiased;
+  -webkit-tap-highlight-color:transparent;
+  overscroll-behavior-y:contain;
+}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+
+/* ---- the tablecloth ---------------------------------------------------- */
+#cloth{position:fixed;inset:0;z-index:-1;background-color:#e8dcc6}
+#cloth::after{content:"";position:absolute;inset:0;
+  background:radial-gradient(120% 90% at 50% 0%,rgba(255,252,244,.55),rgba(60,40,20,.14) 78%)}
+
+/* ---- shell ------------------------------------------------------------- */
+#shell{max-width:520px;margin:0 auto;padding:8px 12px calc(10px + var(--safe-b));
+  min-height:100dvh;display:flex;flex-direction:column;gap:8px}
+/* Header at the top, footer at the bottom, and the play area takes all the
+   slack between them and centres in it — so the board sits in the optical
+   middle rather than the game hanging from the top over a hole. */
+#play{flex:1;display:flex;flex-direction:column;justify-content:center;gap:8px}
+
+header{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:2px 2px 0}
+.brand{font-weight:700;font-size:20px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--ink);text-shadow:0 1px 0 rgba(255,255,255,.6)}
+.brand em{font-style:normal;color:var(--accent)}
+.sub{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft)}
+.scorepill{margin-left:auto;background:var(--cream);border:1px solid var(--cream-edge);
+  border-radius:999px;padding:5px 13px;font-weight:700;font-size:17px;
+  box-shadow:0 1px 2px rgba(0,0,0,.12);font-variant-numeric:tabular-nums;white-space:nowrap}
+.scorepill small{font-weight:500;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-soft);margin-right:5px}
+
+/* ---- board ------------------------------------------------------------- */
+#boardwrap{display:flex;justify-content:center}
+#board{
+  display:grid;grid-template-columns:repeat(4,var(--cell));gap:var(--gap);
+  padding:var(--gap);border-radius:14px;
+  background:linear-gradient(180deg,#f6d4b0,var(--board));
+  border:2px solid var(--board-edge);
+  box-shadow:0 6px 18px rgba(80,45,15,.28),inset 0 1px 0 rgba(255,255,255,.5);
+}
+.cell{
+  width:var(--cell);height:var(--cell);border-radius:var(--tile-r);
+  background:rgba(255,255,255,.34);border:1px solid var(--board-line);
+  display:flex;align-items:center;justify-content:center;position:relative;
+  font-size:calc(var(--cell)*.19);font-weight:700;letter-spacing:.04em;
+  color:#9a5f2e;text-align:center;line-height:1.05;
+}
+.cell.dl{background:var(--dl);color:var(--dl-ink);border-color:rgba(0,0,0,.12)}
+.cell.tl{background:var(--tl);color:var(--tl-ink);border-color:rgba(0,0,0,.2)}
+.cell.dw{background:var(--dw);color:var(--dw-ink);border-color:rgba(0,0,0,.12)}
+.cell.tw{background:var(--tw);color:var(--tw-ink);border-color:rgba(0,0,0,.2)}
+.cell.row-live{outline:2px dashed rgba(200,118,58,.85);outline-offset:-4px}
+
+/* a tile sitting on the board */
+.cell .tile{position:absolute;inset:0}
+
+/* ---- tiles ------------------------------------------------------------- */
+.tile{
+  border-radius:var(--tile-r);
+  background:linear-gradient(178deg,#fffdf7,var(--cream) 46%,#f2e8d4);
+  border:1px solid var(--cream-edge);
+  box-shadow:0 2px 0 #d9c7a6,0 3px 6px rgba(70,45,20,.22);
+  display:flex;align-items:center;justify-content:center;position:relative;
+  font-weight:600;color:var(--ink);user-select:none;
+}
+.tile .ch{font-size:calc(var(--cell)*.52);line-height:1;letter-spacing:.01em}
+.tile .val{position:absolute;right:5px;bottom:2px;font-size:calc(var(--cell)*.2);
+  font-weight:600;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+.tile.placed{box-shadow:0 1px 0 #d9c7a6,0 2px 4px rgba(70,45,20,.26)}
+
+/* ---- the word you are building ---------------------------------------- */
+#stage{display:flex;align-items:center;gap:11px;min-height:calc(var(--cell)*.92);
+  background:rgba(255,255,255,.26);border:1px solid rgba(255,255,255,.55);
+  border-radius:12px;padding:6px 10px 6px 6px}
+#slots{display:grid;grid-template-columns:repeat(4,calc(var(--cell)*.76));gap:5px;flex:0 0 auto}
+.slot{width:calc(var(--cell)*.76);height:calc(var(--cell)*.76);border-radius:8px;
+  border:1px solid rgba(120,90,55,.45);
+  background:rgba(120,90,55,.13);box-shadow:inset 0 2px 4px rgba(90,65,35,.18);
+  position:relative}
+.slot .tile{position:absolute;inset:0}
+.slot .tile .ch{font-size:calc(var(--cell)*.42)}
+.slot .tile .val{font-size:calc(var(--cell)*.16)}
+#verdict{flex:1;min-width:0;text-align:left}
+#vword{font-weight:700;font-size:16px;letter-spacing:.1em;text-transform:uppercase;line-height:1.1}
+#vnote{font-size:12.5px;color:var(--ink-soft);line-height:1.3;margin-top:2px}
+#vnote.bad{color:var(--bad)}
+#vnote .pts{color:var(--good);font-weight:700}
+
+/* ---- tray -------------------------------------------------------------- */
+/* The tray holds what is still in your hand and nothing else. An earlier
+   version kept sixteen fixed positions and hid the spent ones, which was
+   stable but looked broken once twelve tiles were on the grid. */
+#tray{display:grid;grid-template-columns:repeat(8,1fr);gap:5px;
+  background:rgba(255,255,255,.26);border-radius:12px;padding:6px;
+  border:1px solid rgba(255,255,255,.55);min-height:calc(var(--cell)*.62)}
+#tray .tile{aspect-ratio:1;width:100%}
+#tray .tile .ch{font-size:calc(var(--cell)*.36)}
+#tray .tile .val{font-size:calc(var(--cell)*.15);right:3px;bottom:1px}
+#tray .tile.pick{outline:2px solid var(--accent);outline-offset:1px}
+
+/* ---- buttons ----------------------------------------------------------- */
+.row-btns{display:flex;gap:8px}
+.btn{flex:1;border-radius:11px;padding:12px 10px;font-weight:700;font-size:14px;
+  letter-spacing:.1em;text-transform:uppercase;text-align:center;
+  background:var(--cream);border:1px solid var(--cream-edge);
+  box-shadow:0 2px 0 #d9c7a6;transition:transform .08s,opacity .15s}
+.btn:active{transform:translateY(2px);box-shadow:none}
+.btn.primary{background:var(--accent);color:#fff8ef;border-color:#a85e28;box-shadow:0 2px 0 #97521f}
+.btn[disabled]{opacity:.42;pointer-events:none}
+.btn.small{flex:0 0 auto;padding:12px 14px;letter-spacing:.06em}
+
+/* ---- floating score chips --------------------------------------------- */
+.chip{position:absolute;z-index:40;pointer-events:none;font-weight:700;font-size:14px;
+  padding:3px 9px;border-radius:999px;background:var(--good);color:#f2fff9;
+  box-shadow:0 3px 10px rgba(0,0,0,.3);white-space:nowrap;
+  animation:float 1.25s cubic-bezier(.2,.7,.3,1) forwards}
+.chip.down{background:var(--tw);color:#fbf3ff}
+.chip.across{background:var(--good);color:#f2fff9}
+@keyframes float{
+  0%{opacity:0;transform:translate(-50%,4px) scale(.7)}
+  18%{opacity:1;transform:translate(-50%,-6px) scale(1.08)}
+  32%{transform:translate(-50%,-10px) scale(1)}
+  100%{opacity:0;transform:translate(-50%,-46px) scale(1)}
+}
+.cell.flash{animation:flash .55s ease-out}
+@keyframes flash{0%{box-shadow:0 0 0 0 rgba(107,63,122,0)}
+  35%{box-shadow:0 0 0 6px rgba(107,63,122,.5)}100%{box-shadow:0 0 0 0 rgba(107,63,122,0)}}
+.cell.downlit{animation:downlit .9s ease-out}
+@keyframes downlit{0%,100%{filter:none}40%{filter:brightness(1.28) saturate(1.3)}}
+.tile.drop{animation:drop .34s cubic-bezier(.2,1.3,.4,1)}
+@keyframes drop{0%{transform:translateY(-16px) scale(.86);opacity:.2}100%{transform:none;opacity:1}}
+.shake{animation:shake .34s}
+@keyframes shake{0%,100%{transform:none}20%{transform:translateX(-6px)}
+  40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(3px)}}
+@media (prefers-reduced-motion:reduce){
+  .chip,.cell.flash,.cell.downlit,.tile.drop,.shake{animation:none!important}
+  .chip{opacity:1}
+}
+
+/* ---- panels, end card -------------------------------------------------- */
+.sheet{background:var(--cream);border:1px solid var(--cream-edge);border-radius:14px;
+  padding:14px 15px;box-shadow:0 3px 12px rgba(70,45,20,.18)}
+.sheet h2{margin:0 0 8px;font-size:14px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+.sheet p{margin:0 0 8px;font-size:14px;line-height:1.5}
+.sheet ul{margin:0 0 8px;padding-left:18px;font-size:14px;line-height:1.55}
+.sheet li{margin-bottom:3px}
+.muted{color:var(--ink-soft);font-size:12.5px;line-height:1.5}
+.key{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.key span{font-size:11px;font-weight:700;padding:4px 8px;border-radius:6px;letter-spacing:.06em}
+.key .k-dl{background:var(--dl);color:var(--dl-ink)}
+.key .k-tl{background:var(--tl);color:var(--tl-ink)}
+.key .k-dw{background:var(--dw);color:var(--dw-ink)}
+.key .k-tw{background:var(--tw);color:var(--tw-ink)}
+
+#overlay{position:fixed;inset:0;z-index:60;background:rgba(43,33,24,.62);
+  display:none;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto;
+  backdrop-filter:blur(2px)}
+#overlay.on{display:flex}
+#card{background:var(--cream);border-radius:16px;max-width:460px;width:100%;
+  padding:20px 18px calc(18px + var(--safe-b));box-shadow:0 18px 50px rgba(0,0,0,.4);margin:auto 0}
+#card h1{margin:0 0 2px;font-size:22px;letter-spacing:.1em;text-transform:uppercase}
+.bigscore{font-size:46px;font-weight:700;line-height:1;margin:10px 0 2px;font-variant-numeric:tabular-nums}
+.breakdown{font-size:13.5px;color:var(--ink-soft);line-height:1.6;margin-bottom:10px}
+.breakdown b{color:var(--ink)}
+.meter{height:10px;border-radius:999px;background:#e6d9c0;overflow:hidden;margin:10px 0 6px}
+.meter i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),#e0a45f)}
+.closebtn{position:absolute;top:10px;right:12px;font-size:22px;line-height:1;color:var(--ink-soft);padding:6px}
+.wordlist{font-size:13px;line-height:1.7;margin:6px 0 0}
+.wordlist code{font-family:inherit;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+
+input[type=email]{width:100%;padding:11px 12px;border-radius:10px;border:1px solid var(--cream-edge);
+  background:#fff;font:inherit;margin-bottom:8px}
+#guffbar-slot{margin-top:10px}
+.trimnote{font-size:12px;color:var(--ink-soft);text-align:center;padding:8px}
+footer{text-align:center;font-size:11.5px;color:var(--ink-soft);padding:6px 0 2px;line-height:1.7}
+footer a{color:var(--ink-soft)}
+
+/* Short phones: the tray and the play button stay on screen, always. */
+@media (max-height:720px){
+  .sheet{padding:11px 12px}
+  header{padding-top:0}
+  .brand{font-size:17px}
+  #shell{gap:6px}
+  .btn{padding:10px}
+}
+</style>
+</head>
+<body>
+<div id="cloth"></div>
+
+<div id="shell">
+  <header>
+    <div>
+      <div class="brand">Hex<em>adec</em></div>
+      <div class="sub" id="dateline">&nbsp;</div>
+    </div>
+    <div class="scorepill"><small>Score</small><span id="score">0</span></div>
+  </header>
+
+  <div id="play">
+    <div id="boardwrap"><div id="board" aria-label="The grid"></div></div>
+
+    <div id="stage">
+      <div id="slots" aria-label="The word you are building"></div>
+      <div id="verdict">
+        <div id="vword">&nbsp;</div>
+        <div id="vnote">Tap four tiles.</div>
+      </div>
+    </div>
+
+    <div class="row-btns">
+      <button class="btn primary" id="btnPlay" disabled>Place word</button>
+      <button class="btn small" id="btnClear" title="Send the staged tiles back">Clear</button>
+      <button class="btn small" id="btnMix" title="Rearrange the tray">Mix</button>
+    </div>
+
+    <div id="tray" aria-label="The tiles still in your hand"></div>
+
+    <div class="row-btns" id="extraBtns" style="display:none">
+      <button class="btn" id="btnStuck">Show me a word</button>
+    </div>
+  </div>
+
+  <div class="sheet" id="rules">
+    <h2>How it goes</h2>
+    <p>Sixteen tiles. Hidden among them are four four-letter words that use every
+    tile exactly. Build one and it lands on the next row down.</p>
+    <ul>
+      <li>Plenty of words can be made. Only some sets of four use up all sixteen tiles, so three good words can still leave you holding nonsense.</li>
+      <li>Tap any letter of a word already on the grid to take it back. The words below it move up.</li>
+      <li>Columns that happen to read as a word score a bonus too, top to bottom. A full four-letter column scores double.</li>
+      <li>Finish quickly and you keep what is left of five quiet minutes as bonus points. There is no clock on screen.</li>
+    </ul>
+    <div class="key">
+      <span class="k-dl">2×L double letter</span>
+      <span class="k-tl">3×L triple letter</span>
+      <span class="k-dw">2×W double word</span>
+      <span class="k-tw">3×W triple word</span>
+    </div>
+    <p class="muted">A premium square counts on the turn you cover it, and it counts for the
+    column too. Later words score their own squares, not yours.</p>
+    <button class="btn" id="btnHideRules">Got it</button>
+  </div>
+
+  <div id="guffbar-home"><div id="guffbar-slot"></div></div>
+
+  <footer>
+    <a href="#" id="linkRules">How to play</a> ·
+    <a href="#" id="linkHome">Add to home screen</a><br>
+    A <a href="https://guff.carlosfandango.net/">Guff</a> game
+  </footer>
+</div>
+
+<div id="overlay">
+  <div id="card" style="position:relative">
+    <button class="closebtn" id="btnClose" aria-label="Close">×</button>
+    <div id="cardBody"></div>
+  </div>
+</div>
+
+<script defer src="https://guff.carl-b82.workers.dev/guff-bar.js" data-game="hexadec"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

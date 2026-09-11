@@ -1,0 +1,19 @@
+{
+  "name": "hexadec",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:remote": "wrangler d1 execute hexadec --remote --file=schema.sql",
+    "words": "node tools/build-words.mjs",
+    "days": "node tools/build-days.mjs",
+    "serve": "node tools/serve.mjs",
+    "bot": "node tools/bot.mjs",
+    "check": "node tools/check-engine.mjs",
+    "ui": "node tools/ui.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}
