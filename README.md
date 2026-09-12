@@ -62,6 +62,13 @@ earlier rows contribute face value. An invalid column never blocks a play; a
 grid whose rows and columns are all words is a double word square, which is
 vanishingly rare, and requiring one would make almost every day unwinnable.
 
+**The tray does not close its gaps while you are choosing.** A staged tile
+leaves a hole exactly where it was; the holes close only when the word is
+placed. This matters more than it sounds: when the tray reflowed on every tap,
+the letter you were reaching for moved out from under your thumb and you picked
+the wrong one. `npm run ui` section 4 asserts the last tile does not move while
+a word is being built.
+
 **Taking a word back** removes that row and closes the gap — the rows below
 move up. Score is not accumulated; it is recomputed from the ordered list of
 words every time that list changes, so there is no way to bank points from a
@@ -70,8 +77,14 @@ same word ten times.
 
 **The clock** is five minutes, hidden, started on the first tap and paused when
 the tab is. What is left of it scores **one point per five seconds**, so the
-bonus tops out at 60 against a grid score of 100 to 250. Using *Show me a word*
-forfeits it entirely.
+bonus tops out at 60 against a grid score of 100 to 250.
+
+**I'm stuck** finds a word for the current row that still leaves a finishable
+remainder, backing up through placed rows if it has to. **Once per game, and it
+costs 20 points.** It was unlimited and forfeited the whole time bonus, which
+was too generous and too harsh at the same time: you could lean on it every row,
+but doing so cost up to 60. A flat 20, once, is a price you can decide to pay,
+and the clock keeps running either way.
 
 It was a point per second to begin with, which paid up to 300 and made the
 clock worth more than the puzzle. Shortening the clock to three minutes would

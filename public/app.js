@@ -32,6 +32,13 @@ const FULL_SECONDS = 300;
 const BONUS_PER = 5;               // seconds per bonus point, so the clock tops out at 60
 const LEAGUE_MAX = 360;            // grid (~300 ceiling) plus the clock (60)
 
+/* I'M STUCK costs 20 points and can be used once. It used to be unlimited and
+ * to forfeit the whole time bonus, which was both too generous and too harsh at
+ * once: you could lean on it for every row, but doing so cost up to 60. A flat
+ * 20, once, is a price you can decide to pay. The clock keeps running either
+ * way. */
+const STUCK_COST = 20;
+
 const FOUR_SET = new Set(FOURS.split(" "));
 const WORD_SET = new Set([...FOUR_SET, ...THREES.split(" "), ...TWOS.split(" ")]);
 const isWord = (s) => WORD_SET.has(s);
@@ -193,15 +200,24 @@ function paintBoard() {
   }
 }
 
+/* The tray does NOT close its gaps while you are choosing.
+ *
+ * It used to, and that made it treacherous: every tap reflowed the row, so the
+ * letter you were about to press moved out from under your thumb and you picked
+ * the wrong one. A tile you have staged now leaves a hole exactly where it was,
+ * and the holes close only when the word is placed — at which point the tiles
+ * are gone for good and closing up is what you want. */
 function paintTray() {
   const tray = $("tray");
   tray.innerHTML = "";
-  const spoken = new Set([...S.staged, ...S.rows.flatMap((r) => r.ids)]);
+  const placed = new Set(S.rows.flatMap((r) => r.ids));
+  const staged = new Set(S.staged);
   for (const id of S.order) {
-    if (spoken.has(id)) continue;
+    if (placed.has(id)) continue;
     const t = tileById(id);
-    const n = tileNode(t);
-    n.addEventListener("click", () => stage(id));
+    const held = staged.has(id);
+    const n = tileNode(t, held ? "ghost" : "");
+    if (!held) n.addEventListener("click", () => stage(id));
     tray.appendChild(n);
   }
 }
@@ -257,10 +273,15 @@ function preview() {
   $("btnPlay").disabled = false;
 }
 
-function repaint() {
-  paintBoard(); paintTray(); paintSlots(); paintScore(); preview();
+/* Offered from the moment the first tile is tapped, and gone once used or once
+   the game is over. The 20 points are the regulator, not the timing. */
+function paintExtras() {
   $("extraBtns").style.display =
-    (!S.ended && (S.ms >= FULL_SECONDS * 1000 || S.takebacks >= 4)) ? "flex" : "none";
+    (!S.ended && !S.helped && (S.running || S.ms > 0)) ? "flex" : "none";
+}
+
+function repaint() {
+  paintBoard(); paintTray(); paintSlots(); paintScore(); preview(); paintExtras();
 }
 
 /* ---------------------------------------------------------------------------
@@ -278,9 +299,14 @@ function stopClock() {
 }
 function elapsedMs() { return S.ms + (S.running ? Date.now() - S.t0 : 0); }
 function timeBonus() {
-  if (S.helped) return 0;
   const left = Math.max(0, FULL_SECONDS - Math.floor(elapsedMs() / 1000));
   return Math.floor(left / BONUS_PER);
+}
+function penalty() { return S.helped ? STUCK_COST : 0; }
+/* What goes on the end card, into the league and to /api/played. Floored at
+   zero so a short game with a nudge can never read as a negative. */
+function finalScore() {
+  return Math.max(0, currentScore().total + timeBonus() - penalty());
 }
 
 function stage(id) {
@@ -290,7 +316,7 @@ function stage(id) {
   if (S.rows.some((r) => r.ids.includes(id))) return;
   if (S.staged.length >= 4) return;
   S.staged.push(id);
-  paintTray(); paintSlots(); preview();
+  paintTray(); paintSlots(); preview(); paintExtras();
 }
 
 function unstage(i) {
@@ -402,7 +428,7 @@ function completable(counts, list, depth) {
   return false;
 }
 
-function showMeAWord() {
+function useStuck() {
   /* The moment a player most needs this is the moment it is hardest to give:
      three words down and the last four tiles spelling nothing. There is no word
      to suggest for that row, and an earlier version simply said "nothing fits,
@@ -410,6 +436,7 @@ function showMeAWord() {
      not say WHICH. So it backs up for them, one row at a time, until there is a
      word that leaves a way home. Every shipped day is solvable from an empty
      grid, so this always terminates with a suggestion. */
+  if (S.helped || S.ended) return;   // one to a customer
   let removed = 0;
   let pick = null;
   while (true) {
@@ -438,8 +465,8 @@ function showMeAWord() {
   repaint();
   $("vnote").className = "";
   $("vnote").innerHTML = removed
-    ? `Took back ${removed} word${removed > 1 ? "s" : ""}. This one leaves a way home.`
-    : "This one leaves a way home. No time bonus now.";
+    ? `Took back ${removed} word${removed > 1 ? "s" : ""}. This one leaves a way home. −${STUCK_COST}.`
+    : `This one leaves a way home. −${STUCK_COST} at the end.`;
   save();
 }
 
@@ -524,12 +551,11 @@ function shareText() {
   const bonus = timeBonus();
   const pct = Math.round(words / S.max * 100);
   const bits = [
-    `Hexadec ${nice} · ${(words + bonus).toLocaleString()}`,
-    `${words} on the grid${bonus ? ` + ${bonus} on the clock` : ""} · ${pct}% of the best possible`,
+    `Hexadec ${nice} · ${finalScore().toLocaleString()}`,
+    `${words} on the grid${bonus ? ` + ${bonus} on the clock` : ""}${S.helped ? ` − ${STUCK_COST} for a nudge` : ""} · ${pct}% of the best possible`,
     "",
     shareArt(),
   ];
-  if (S.helped) bits.push("", "(with a nudge)");
   bits.push(SITE_URL);
   return bits.join("\n");
 }
@@ -552,7 +578,7 @@ function showCard() {
   const detail = currentScore();
   const words = detail.total;
   const bonus = timeBonus();
-  const total = words + bonus;
+  const total = finalScore();
   const pct = Math.round(words / S.max * 100);
   const secs = Math.floor(elapsedMs() / 1000);
   const mm = Math.floor(secs / 60), ss = String(secs % 60).padStart(2, "0");
@@ -577,8 +603,7 @@ function showCard() {
     <div class="muted">${new Date(S.date + "T12:00:00").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}</div>
     <div class="bigscore">${total.toLocaleString()}</div>
     <div class="breakdown">
-      <b>${words}</b> on the grid${bonus ? ` + <b>${bonus}</b> for the time left` : ""}
-      ${S.helped ? '<br><span class="muted">Nudged, so no time bonus.</span>' : ""}
+      <b>${words}</b> on the grid${bonus ? ` + <b>${bonus}</b> for the time left` : ""}${S.helped ? ` − <b>${STUCK_COST}</b> for a nudge` : ""}
       <br>Finished in ${mm}:${ss}${S.takebacks ? ` · ${S.takebacks} take-back${S.takebacks > 1 ? "s" : ""}` : ""}
     </div>
     <div class="meter"><i style="width:${Math.min(100, pct)}%"></i></div>
@@ -674,13 +699,12 @@ function report() {
   } catch (e) {}
   S.sent = true;
   const words = currentScore().total;
-  const bonus = timeBonus();
   try {
     fetch("/api/played", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         date: S.date, complete: S.rows.length === 4 ? 1 : 0,
-        score: words + bonus, words, seconds: Math.floor(elapsedMs() / 1000),
+        score: finalScore(), words, seconds: Math.floor(elapsedMs() / 1000),
         pct: Math.round(words / S.max * 100), helped: S.helped ? 1 : 0,
       }),
     }).catch(() => {});
@@ -692,7 +716,7 @@ function paintBar() {
   const slot = $("guffbar-slot");
   if (!slot) return;
   const words = currentScore().total;
-  const total = words + timeBonus();
+  const total = finalScore();
   const pct = Math.round(words / S.max * 100);
   if (window.GuffBar && GuffBar.completedToday) {
     GuffBar.completedToday(slot, {
@@ -769,7 +793,7 @@ function boot() {
   $("btnPlay").addEventListener("click", placeWord);
   $("btnClear").addEventListener("click", clearStage);
   $("btnMix").addEventListener("click", mix);
-  $("btnStuck").addEventListener("click", showMeAWord);
+  $("btnStuck").addEventListener("click", useStuck);
   $("linkHome").addEventListener("click", (e) => { e.preventDefault(); homeScreenCard(); });
   $("btnClose").addEventListener("click", () => {
     $("overlay").classList.remove("on");
@@ -781,14 +805,8 @@ function boot() {
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) { stopClock(); save(); }
   });
-  /* A tick that only exists so "show me a word" can appear when the five
-     minutes are up, without anything counting down on screen. */
-  setInterval(() => {
-    if (!S.ended && S.running) {
-      const want = S.ms + (Date.now() - S.t0) >= FULL_SECONDS * 1000 || S.takebacks >= 4;
-      $("extraBtns").style.display = want ? "flex" : "none";
-    }
-  }, 2000);
+  /* A backstop for the button's visibility; every interaction paints it too. */
+  setInterval(() => { if (!S.ended) paintExtras(); }, 2000);
 
   if (S.ended) { finish(); }
   else if (S.rows.length === 4) { finish(); }
@@ -796,8 +814,8 @@ function boot() {
 
 /* Test and tooling hook, in the family style. */
 window.__hx = {
-  S, E, isWord, FOUR_LIST, currentScore, placeWord, stage, takeBack, showMeAWord,
-  shareText, finish, timeBonus, state: () => ({
+  S, E, isWord, FOUR_LIST, currentScore, placeWord, stage, takeBack, useStuck,
+  shareText, finish, timeBonus, penalty, finalScore, state: () => ({
     rows: S.rows.map((r) => r.word), score: currentScore().total,
     max: S.max, ended: S.ended, helped: S.helped, takebacks: S.takebacks,
   }),

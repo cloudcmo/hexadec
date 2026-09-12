@@ -13,7 +13,8 @@
  * falling below the fold on a small phone; that a word can be built, placed and
  * taken back; that score is a pure function of the grid and cannot be farmed by
  * placing and removing; that column bonuses fire; that a finished day survives a
- * reload; and that the share text gives away no letters.
+ * reload; that the tray does not reflow while a word is being chosen; and that
+ * I'm stuck can be used once and costs 20.
  */
 
 import { chromium } from "playwright";
@@ -182,6 +183,112 @@ console.log("\n3. A full game, the end card, and a reload");
   const after = await page.evaluate(() => window.__hx.state());
   ok("the finished game survives a reload", after.ended === true && after.rows.length === 4, JSON.stringify(after));
   ok("the end card comes back", await page.isVisible("#card"));
+  ok("no page errors", errors.length === 0, errors.join(" | "));
+  await page.close();
+}
+
+/* ---- 4. the tray must not move under your thumb ------------------------- */
+console.log("\n4. The tray holds its shape while you choose");
+{
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(BASE, { waitUntil: "networkidle" });
+
+  const r = await page.evaluate(() => {
+    const hx = window.__hx, { S, E } = hx;
+    const count = () => document.querySelectorAll("#tray .tile").length;
+    const hidden = () => [...document.querySelectorAll("#tray .tile")]
+      .filter((n) => getComputedStyle(n).visibility === "hidden").length;
+    /* where is the last tray tile, before and after staging? */
+    const lastLeft = () => {
+      const ns = document.querySelectorAll("#tray .tile");
+      return ns.length ? Math.round(ns[ns.length - 1].getBoundingClientRect().left) : -1;
+    };
+    const before = { n: count(), hidden: hidden(), last: lastLeft() };
+
+    const rack = S.tiles.map((t) => t.ch).join("");
+    const word = E.makeableWords(rack, hx.FOUR_LIST)[0];
+    const used = new Set();
+    for (const ch of word) {
+      const t = S.tiles.find((x) => x.ch === ch && !used.has(x.id));
+      used.add(t.id); hx.stage(t.id);
+    }
+    const staged = { n: count(), hidden: hidden(), last: lastLeft() };
+    hx.placeWord();
+    const placed = { n: count(), hidden: hidden(), last: lastLeft() };
+    return { before, staged, placed, word };
+  });
+
+  ok("sixteen tiles to start", r.before.n === 16 && r.before.hidden === 0, JSON.stringify(r.before));
+  ok("staging four leaves sixteen seats, four of them empty",
+    r.staged.n === 16 && r.staged.hidden === 4, JSON.stringify(r.staged));
+  ok("nothing shifted while choosing", r.staged.last === r.before.last,
+    `last tile moved from ${r.before.last} to ${r.staged.last}`);
+  ok("placing the word closes the gaps", r.placed.n === 12 && r.placed.hidden === 0,
+    JSON.stringify(r.placed));
+  ok("no page errors", errors.length === 0, errors.join(" | "));
+  await page.close();
+}
+
+/* ---- 5. I'm stuck: once, and it costs ----------------------------------- */
+console.log("\n5. I'm stuck");
+{
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(BASE, { waitUntil: "networkidle" });
+
+  const hiddenAtStart = await page.isHidden("#extraBtns");
+  ok("the button is not there before you start", hiddenAtStart);
+
+  const r = await page.evaluate(() => {
+    const hx = window.__hx, { S } = hx;
+    hx.stage(S.tiles[0].id);                      // starts the clock
+    const shown = getComputedStyle(document.getElementById("extraBtns")).display !== "none";
+    const label = document.getElementById("btnStuck").textContent.replace(/\s+/g, " ").trim();
+    hx.useStuck();
+    const first = { staged: S.staged.length, helped: S.helped, penalty: hx.penalty() };
+    hx.useStuck();                                 // a second go must do nothing
+    const second = { helped: S.helped, penalty: hx.penalty() };
+    const gone = getComputedStyle(document.getElementById("extraBtns")).display === "none";
+    return { shown, label, first, second, gone };
+  });
+
+  ok("it appears once you start playing", r.shown);
+  ok("it is labelled I'm stuck and shows the cost", /I'm stuck/.test(r.label) && /20/.test(r.label), r.label);
+  ok("it stages a whole word", r.first.staged === 4, JSON.stringify(r.first));
+  ok("it costs 20", r.first.penalty === 20, JSON.stringify(r.first));
+  ok("a second use costs no more", r.second.penalty === 20, JSON.stringify(r.second));
+  ok("the button goes away once used", r.gone);
+
+  /* finish the day and check the 20 really comes off the total.
+     The nudge above left a word staged; drop it and play a known solution, so
+     the only thing under test here is the penalty. */
+  const done = await page.evaluate(() => {
+    const hx = window.__hx, { S, E } = hx;
+    S.staged.length = 0;
+    const rack = S.tiles.map((t) => t.ch).join("");
+    const sol = E.findSolutions(rack, E.makeableWords(rack, hx.FOUR_LIST), 1)[0];
+    for (const word of sol) {
+      const used = new Set(S.rows.flatMap((x) => x.ids));
+      for (const ch of word) {
+        const t = S.tiles.find((x) => x.ch === ch && !used.has(x.id) && !S.staged.includes(x.id));
+        if (t) hx.stage(t.id);
+      }
+      hx.placeWord();
+    }
+    hx.finish();
+    return {
+      rows: S.rows.length, words: hx.currentScore().total,
+      bonus: hx.timeBonus(), penalty: hx.penalty(), final: hx.finalScore(),
+      card: document.getElementById("cardBody").textContent.replace(/\s+/g, " "),
+    };
+  });
+  ok("the day finished", done.rows === 4, JSON.stringify(done).slice(0, 160));
+  ok("final = grid + clock − 20", done.final === Math.max(0, done.words + done.bonus - done.penalty),
+    JSON.stringify(done));
+  ok("the end card owns up to the nudge", /for a nudge/.test(done.card), done.card.slice(0, 200));
   ok("no page errors", errors.length === 0, errors.join(" | "));
   await page.close();
 }

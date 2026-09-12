@@ -160,6 +160,10 @@ header{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
 #tray .tile .ch{font-size:calc(var(--cell)*.36)}
 #tray .tile .val{font-size:calc(var(--cell)*.15);right:3px;bottom:1px}
 #tray .tile.pick{outline:2px solid var(--accent);outline-offset:1px}
+/* A staged tile keeps its seat in the tray rather than vanishing, so nothing
+   shuffles under your thumb mid-word. See paintTray in app.js. */
+#tray .tile.ghost{visibility:hidden}
+.btn .cost{font-size:12px;opacity:.75;letter-spacing:.04em}
 
 /* ---- buttons ----------------------------------------------------------- */
 .row-btns{display:flex;gap:8px}
@@ -291,7 +295,7 @@ footer a{color:var(--ink-soft)}
     <div id="tray" aria-label="The tiles still in your hand"></div>
 
     <div class="row-btns" id="extraBtns" style="display:none">
-      <button class="btn" id="btnStuck">Show me a word</button>
+      <button class="btn" id="btnStuck">I'm stuck &nbsp;<span class="cost">−20</span></button>
     </div>
   </div>
 
@@ -307,6 +311,7 @@ footer a{color:var(--ink-soft)}
         <li>Tap any letter of a word already on the grid to take it back. The words below it move up.</li>
         <li>Columns that happen to read as a word score a bonus too, top to bottom. A full four-letter column scores double.</li>
         <li>Finish inside five quiet minutes and you keep a point for every five seconds left, up to 60. There is no clock on screen.</li>
+        <li>Properly stuck? <b>I'm stuck</b> finds you a word that still leaves a way home. Once per game, and it costs 20 points.</li>
       </ul>
       <div class="key">
         <span class="k-dl">2×L double letter</span>
