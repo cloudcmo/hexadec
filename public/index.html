@@ -127,8 +127,15 @@ header{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
   font-weight:600;color:var(--ink);user-select:none;
 }
 .tile .ch{font-size:calc(var(--cell)*.52);line-height:1;letter-spacing:.01em}
+.tile{padding:0;text-align:center}
 .tile .val{position:absolute;right:5px;bottom:2px;font-size:calc(var(--cell)*.2);
   font-weight:600;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+/* The square under a placed tile. Without it a finished grid can be totalled
+   but not read: you cannot see which letter caught the triple. */
+.tile .prem{position:absolute;left:4px;top:2px;line-height:1;opacity:.75;
+  font-size:calc(var(--cell)*.155);font-weight:700;letter-spacing:0}
+.tile .prem.p-letter{color:#0f6e63}
+.tile .prem.p-word{color:#6b3f7a}
 .tile.placed{box-shadow:0 1px 0 #d9c7a6,0 2px 4px rgba(70,45,20,.26)}
 
 /* ---- the word you are building ---------------------------------------- */
@@ -237,6 +244,12 @@ header{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
 
 input[type=email]{width:100%;padding:11px 12px;border-radius:10px;border:1px solid var(--cream-edge);
   background:#fff;font:inherit;margin-bottom:8px}
+/* Keyboard users need to see where they are. */
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px;border-radius:6px}
+.tally{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 2px}
+.tally span{font-size:12px;color:var(--ink-soft);background:#efe6d4;
+  border:1px solid var(--cream-edge);border-radius:999px;padding:4px 10px}
+.tally b{color:var(--ink);font-variant-numeric:tabular-nums}
 #guffbar-slot{margin-top:10px}
 .trimnote{font-size:12px;color:var(--ink-soft);text-align:center;padding:8px}
 /* The instructions are there for the one person in twenty who wants them and
@@ -280,7 +293,7 @@ footer a{color:var(--ink-soft)}
 
     <div id="stage">
       <div id="slots" aria-label="The word you are building"></div>
-      <div id="verdict">
+      <div id="verdict" aria-live="polite">
         <div id="vword">&nbsp;</div>
         <div id="vnote">Tap four tiles.</div>
       </div>
@@ -312,6 +325,7 @@ footer a{color:var(--ink-soft)}
         <li>Columns that happen to read as a word score a bonus too, top to bottom. A full four-letter column scores double.</li>
         <li>Finish inside five quiet minutes and you keep a point for every five seconds left, up to 60. There is no clock on screen.</li>
         <li>Properly stuck? <b>I'm stuck</b> finds you a word that still leaves a way home. Once per game, and it costs 20 points.</li>
+        <li>On a keyboard you can simply type the word. Backspace takes a letter back, enter places it, escape clears.</li>
       </ul>
       <div class="key">
         <span class="k-dl">2×L double letter</span>

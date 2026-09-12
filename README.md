@@ -92,6 +92,28 @@ have paid up to 180 and *also* put a hurry on a game meant to be unhurried;
 scoring the same five minutes more cheaply fixes the proportion and leaves the
 pace alone.
 
+**A placed tile keeps showing the square it covered**, as a small code in its
+top corner. Without it a finished grid can be totalled but not read: you cannot
+see which letter caught the triple.
+
+**Memory** is one localStorage key, `hexadec-history`, holding
+`{date, score, percent}` for the last 180 days. It drives the streak, the
+personal best and the count on the end card, and the streak line in the share
+text. It is written from `showCard` rather than `finish` and keyed on the date,
+so reopening a finished day rewrites the same row instead of inflating anything.
+
+**The day's average** comes from the Worker's own `GET /api/day` — aggregates
+only, cached a minute, public. It is held back until at least three people have
+played, because "1 person has played today, averaging 153" is you, and being
+told you are exactly average when you are the only player is worse than silence.
+Any failure leaves the line empty.
+
+**Keyboard**: type the word, backspace takes a letter back, enter places it,
+escape clears. Tray tiles are real `<button>`s with labels like "C, 4 points";
+placed rows and staged letters carry roles, labels and Enter/Space handlers; the
+verdict line is `aria-live`. None of that was true when the tiles were `div`s
+with click handlers, and it cost almost nothing to fix.
+
 ---
 
 ## Why the days are built offline

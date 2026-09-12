@@ -39,6 +39,10 @@ const LEAGUE_MAX = 360;            // grid (~300 ceiling) plus the clock (60)
  * way. */
 const STUCK_COST = 20;
 
+/* How many days of results to keep. Six months is plenty for a streak and a
+   personal best, and small enough that localStorage never notices. */
+const HISTORY_DAYS = 180;
+
 const FOUR_SET = new Set(FOURS.split(" "));
 const WORD_SET = new Set([...FOUR_SET, ...THREES.split(" "), ...TWOS.split(" ")]);
 const isWord = (s) => WORD_SET.has(s);
@@ -163,8 +167,16 @@ function fit() {
  * ------------------------------------------------------------------------- */
 const PREM = { d: ["dl", "2×L"], t: ["tl", "3×L"], D: ["dw", "2×W"], T: ["tw", "3×W"] };
 
-function tileNode(t, cls) {
-  const n = el("div", "tile" + (cls ? " " + cls : ""));
+/* A tray tile is a button, because pressing it is the whole game and a div with
+   a click handler cannot be reached from a keyboard or announced by a screen
+   reader. Tiles on the board and in the staging slots stay plain, because there
+   the CELL is the control. */
+function tileNode(t, cls, tag) {
+  const n = el(tag || "div", "tile" + (cls ? " " + cls : ""));
+  if (tag === "button") {
+    n.type = "button";
+    n.setAttribute("aria-label", `${t.ch.toUpperCase()}, ${t.val} point${t.val === 1 ? "" : "s"}`);
+  }
   n.appendChild(el("span", "ch", t.ch.toUpperCase()));
   n.appendChild(el("span", "val", String(t.val)));
   return n;
@@ -181,6 +193,9 @@ function buildBoard() {
       const cell = el("div", "cell" + (p ? " " + p[0] : ""), p ? p[1] : "");
       cell.dataset.r = r; cell.dataset.c = c;
       cell.addEventListener("click", () => takeBack(r));
+      cell.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); takeBack(r); }
+      });
       board.appendChild(cell);
     }
   }
@@ -195,7 +210,27 @@ function paintBoard() {
       if (old) old.remove();
       cell.classList.toggle("row-live", !S.ended && r === S.rows.length);
       const row = S.rows[r];
-      if (row) cell.appendChild(tileNode(tileById(row.ids[c]), "placed"));
+      const code = S.layout[r][c];
+      if (row) {
+        const t = tileNode(tileById(row.ids[c]), "placed");
+        /* What is under the tile. Once a letter covers a triple, the square is
+           invisible and a finished grid can only be totalled, not read. */
+        if (PREM[code]) {
+          t.appendChild(el("span",
+            "prem " + (code === "d" || code === "t" ? "p-letter" : "p-word"),
+            PREM[code][1]));
+        }
+        cell.appendChild(t);
+        cell.setAttribute("role", "button");
+        cell.setAttribute("tabindex", S.ended ? "-1" : "0");
+        cell.setAttribute("aria-label",
+          `Row ${r + 1}: ${row.word.toUpperCase()}${PREM[code] ? `, ${PREM[code][1]} square` : ""}. Take it back.`);
+      } else {
+        cell.removeAttribute("role");
+        cell.removeAttribute("tabindex");
+        cell.setAttribute("aria-label",
+          `Row ${r + 1}, square ${c + 1}${PREM[code] ? `, ${PREM[code][1]}` : ""}, empty`);
+      }
     }
   }
 }
@@ -216,8 +251,9 @@ function paintTray() {
     if (placed.has(id)) continue;
     const t = tileById(id);
     const held = staged.has(id);
-    const n = tileNode(t, held ? "ghost" : "");
-    if (!held) n.addEventListener("click", () => stage(id));
+    const n = tileNode(t, held ? "ghost" : "", "button");
+    if (held) { n.disabled = true; n.setAttribute("aria-hidden", "true"); }
+    else n.addEventListener("click", () => stage(id));
     tray.appendChild(n);
   }
 }
@@ -231,6 +267,14 @@ function paintSlots() {
     if (id != null) {
       s.appendChild(tileNode(tileById(id)));
       s.addEventListener("click", () => unstage(i));
+      s.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); unstage(i); }
+      });
+      s.setAttribute("role", "button");
+      s.setAttribute("tabindex", "0");
+      s.setAttribute("aria-label", `${tileById(id).ch.toUpperCase()}, letter ${i + 1}. Put it back.`);
+    } else {
+      s.setAttribute("aria-label", `Letter ${i + 1}, empty`);
     }
     slots.appendChild(s);
   }
@@ -471,6 +515,46 @@ function useStuck() {
 }
 
 /* ---------------------------------------------------------------------------
+ * What happened yesterday
+ *
+ * A daily game with no memory is a game you have no particular reason to come
+ * back to. This is one localStorage key holding {date, score, percent} per day:
+ * enough for a streak, a personal best and a count, and nothing else.
+ *
+ * Recorded from showCard rather than finish, and keyed on the date, so it is
+ * idempotent — reloading a finished day rewrites the same row rather than
+ * inflating anything.
+ * ------------------------------------------------------------------------- */
+const HISTORY_KEY = "hexadec-history";
+
+function shiftDate(iso, days) {
+  return new Date(Date.parse(iso + "T12:00:00Z") + days * 86400000).toISOString().slice(0, 10);
+}
+function readHistory() {
+  try {
+    const a = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    if (!Array.isArray(a)) return [];
+    return a.filter((e) => e && /^\d{4}-\d{2}-\d{2}$/.test(e.d) && typeof e.s === "number");
+  } catch (e) { return []; }
+}
+function recordDay(score, pct) {
+  const h = readHistory().filter((e) => e.d !== S.date);
+  h.push({ d: S.date, s: score, p: pct });
+  h.sort((a, b) => (a.d < b.d ? -1 : 1));
+  const kept = h.slice(-HISTORY_DAYS);
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(kept)); } catch (e) {}
+  return kept;
+}
+/* Consecutive days up to and including today. */
+function streakOf(h) {
+  const days = new Set(h.map((e) => e.d));
+  let n = 0, d = S.date;
+  while (days.has(d)) { n++; d = shiftDate(d, -1); }
+  return n;
+}
+function bestOf(h) { return h.reduce((m, e) => Math.max(m, e.s), 0); }
+
+/* ---------------------------------------------------------------------------
  * Saving
  * ------------------------------------------------------------------------- */
 const KEY = () => "hexadec-" + S.date;
@@ -556,6 +640,8 @@ function shareText() {
     "",
     shareArt(),
   ];
+  const streak = streakOf(readHistory());
+  if (streak > 1) bits.push("", `${streak} days running`);
   bits.push(SITE_URL);
   return bits.join("\n");
 }
@@ -591,6 +677,10 @@ function showCard() {
     (r.downs.length ? ` <span class="muted">(${r.downs.map((d) => "↓" + d.word.toUpperCase() + " " + d.score).join(" ")})</span>` : "")
   ).join("<br>");
 
+  const history = recordDay(finalScore(), pct);
+  const streak = streakOf(history);
+  const best = bestOf(history);
+
   const comment =
     pct >= 90 ? "Very nearly the best there was." :
     pct >= 78 ? "A strong line." :
@@ -608,6 +698,12 @@ function showCard() {
     </div>
     <div class="meter"><i style="width:${Math.min(100, pct)}%"></i></div>
     <div class="breakdown"><b>${pct}%</b> of the best possible ${S.max}.<br>${comment}</div>
+    <div class="breakdown" id="dayStats"></div>
+    <div class="tally">
+      ${streak > 1 ? `<span><b>${streak}</b> day streak</span>` : ""}
+      <span>Best <b>${best.toLocaleString()}</b></span>
+      <span><b>${history.length}</b> played</span>
+    </div>
     <div class="wordlist">${rowLines}</div>
     ${downs.length ? `<div class="muted" style="margin-top:6px">${downs.length} column word${downs.length > 1 ? "s" : ""}${fulls.length ? `, ${fulls.length} of them the full four` : ""}.</div>` : '<div class="muted" style="margin-top:6px">No columns came good. That is where the points hide.</div>'}
     <div class="row-btns" style="margin-top:14px">
@@ -635,6 +731,7 @@ function showCard() {
     ? "Add Hexadec to your home screen: share button → <b>Add to Home Screen</b>. It becomes an app. No shop, no fee, no fuss."
     : "Add Hexadec to your home screen: ⋮ menu → <b>Add to Home screen</b>. It becomes an app. No shop, no fee, no fuss.";
   $("btnShare").addEventListener("click", doShare);
+  paintDayStats();
   $("btnBest").addEventListener("click", revealBest);
   $("subForm").addEventListener("submit", subscribe);
   barToEnd();
@@ -659,6 +756,26 @@ function revealBest() {
         ? ` <span class="muted">(${sc.rows.flatMap((r) => r.downs).map((d) => "↓" + d.word.toUpperCase()).join(" ")})</span>`
         : "") + `</div>`;
   }, 30);
+}
+
+/* The day's average, from the Worker's own /api/day. Aggregates only, cached a
+   minute, and public. Held back until a few people have played, because "1
+   person has played today, averaging 166" is you, and telling someone their
+   score is exactly average when they are the only player is worse than silence.
+   Any failure leaves the line empty: on the static dev server it 404s. */
+async function paintDayStats() {
+  const node = $("dayStats");
+  if (!node) return;
+  try {
+    const res = await fetch(`/api/day?date=${encodeURIComponent(S.date)}`);
+    if (!res.ok) return;
+    const d = await res.json();
+    if (!d || !d.players || d.players < 3 || d.avgScore == null) return;
+    const mine = finalScore();
+    const how = mine > d.avgScore ? "You are above it."
+      : mine < d.avgScore ? "You are below it." : "Bang on it.";
+    node.innerHTML = `${d.players} people have played today, averaging <b>${d.avgScore}</b>. ${how}`;
+  } catch (e) { /* silence is the correct failure */ }
 }
 
 function tickNext() {
@@ -757,6 +874,44 @@ async function subscribe(ev) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Typing
+ *
+ * On a laptop the natural thing is to type the word, so let people. A letter
+ * takes the first matching tile still in the tray, backspace gives the last one
+ * back, enter places, escape clears. Ignored while a text field has focus or
+ * the end card is up.
+ * ------------------------------------------------------------------------- */
+function onKey(e) {
+  if (S.ended || e.metaKey || e.ctrlKey || e.altKey) return;
+  if ($("overlay").classList.contains("on")) return;
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+
+  const k = e.key;
+  if (/^[a-zA-Z]$/.test(k)) {
+    if (S.staged.length >= 4) return;
+    const ch = k.toLowerCase();
+    const placed = new Set(S.rows.flatMap((r) => r.ids));
+    const id = S.order.find((i) =>
+      !placed.has(i) && !S.staged.includes(i) && tileById(i).ch === ch);
+    if (id == null) return;
+    stage(id);
+    e.preventDefault();
+    return;
+  }
+  if (k === "Backspace") {
+    if (S.staged.length) unstage(S.staged.length - 1);
+    e.preventDefault();
+  } else if (k === "Enter") {
+    if (!$("btnPlay").disabled) placeWord();
+    e.preventDefault();
+  } else if (k === "Escape") {
+    if (S.staged.length) clearStage();
+    e.preventDefault();
+  }
+}
+
+/* ---------------------------------------------------------------------------
  * Boot
  * ------------------------------------------------------------------------- */
 function homeScreenCard() {
@@ -800,6 +955,7 @@ function boot() {
     if (S.ended) barToPage();
   });
 
+  document.addEventListener("keydown", onKey);
   window.addEventListener("resize", fit);
   window.addEventListener("orientationchange", () => setTimeout(fit, 120));
   document.addEventListener("visibilitychange", () => {

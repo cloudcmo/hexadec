@@ -293,6 +293,117 @@ console.log("\n5. I'm stuck");
   await page.close();
 }
 
+/* ---- 6. memory, typing, and the things a screen reader needs ------------ */
+console.log("\n6. Streak, keyboard, labels and premium pips");
+{
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  /* seed yesterday so today makes it a streak of two */
+  await page.addInitScript(() => {
+    const y = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    localStorage.setItem("hexadec-history", JSON.stringify([{ d: y, s: 999, p: 90 }]));
+  });
+  await page.goto(BASE, { waitUntil: "networkidle" });
+
+  /* --- tray tiles are real buttons with real labels --- */
+  const a11y = await page.evaluate(() => {
+    const first = document.querySelector("#tray .tile");
+    return {
+      tag: first.tagName,
+      label: first.getAttribute("aria-label"),
+      liveVerdict: document.getElementById("verdict").getAttribute("aria-live"),
+    };
+  });
+  ok("tray tiles are buttons", a11y.tag === "BUTTON", a11y.tag);
+  ok("and are labelled with letter and value", /^[A-Z], \d+ points?$/.test(a11y.label || ""), String(a11y.label));
+  ok("the verdict is announced", a11y.liveVerdict === "polite", String(a11y.liveVerdict));
+
+  /* --- typing builds the word --- */
+  const typed = await page.evaluate(async () => {
+    const hx = window.__hx, { S, E } = hx;
+    const rack = S.tiles.map((t) => t.ch).join("");
+    const word = E.makeableWords(rack, hx.FOUR_LIST)[0];
+    window.__W = word;
+    return { word };
+  });
+  for (const ch of typed.word) await page.keyboard.press(ch.toUpperCase());
+  let st = await page.evaluate(() => window.__hx.S.staged.map((i) => window.__hx.S.tiles[i].ch).join(""));
+  ok("typing the letters stages the word", st === typed.word, `${st} vs ${typed.word}`);
+
+  await page.keyboard.press("Backspace");
+  st = await page.evaluate(() => window.__hx.S.staged.length);
+  ok("backspace gives a letter back", st === 3, String(st));
+
+  await page.keyboard.press("Escape");
+  st = await page.evaluate(() => window.__hx.S.staged.length);
+  ok("escape clears the lot", st === 0, String(st));
+
+  for (const ch of typed.word) await page.keyboard.press(ch.toUpperCase());
+  await page.keyboard.press("Enter");
+  const afterEnter = await page.evaluate(() => ({
+    rows: window.__hx.S.rows.length,
+    word: window.__hx.S.rows[0] && window.__hx.S.rows[0].word,
+  }));
+  ok("enter places it", afterEnter.rows === 1 && afterEnter.word === typed.word, JSON.stringify(afterEnter));
+
+  /* --- a placed tile shows the square it covered --- */
+  const pips = await page.evaluate(() => {
+    const cells = [...document.querySelectorAll("#board .cell")].slice(0, 4);
+    const prem = cells.filter((c) => /dl|tl|dw|tw/.test(c.className)).length;
+    const shown = cells.filter((c) => c.querySelector(".tile .prem")).length;
+    const label = cells[0].getAttribute("aria-label") || "";
+    const role = cells[0].getAttribute("role");
+    return { prem, shown, label, role };
+  });
+  ok("every premium square under row 1 still shows itself",
+    pips.shown === pips.prem, `${pips.shown} pips for ${pips.prem} premium squares`);
+  ok("a placed row is reachable and explains itself",
+    pips.role === "button" && /Take it back/.test(pips.label), `${pips.role} / ${pips.label}`);
+
+  /* --- finish, and check the memory --- */
+  const done = await page.evaluate(() => {
+    const hx = window.__hx, { S, E } = hx;
+    S.staged.length = 0;
+    S.rows.length = 0;
+    const rack = S.tiles.map((t) => t.ch).join("");
+    const sol = E.findSolutions(rack, E.makeableWords(rack, hx.FOUR_LIST), 1)[0];
+    for (const w of sol) {
+      const used = new Set(S.rows.flatMap((x) => x.ids));
+      for (const ch of w) {
+        const t = S.tiles.find((x) => x.ch === ch && !used.has(x.id) && !S.staged.includes(x.id));
+        if (t) hx.stage(t.id);
+      }
+      hx.placeWord();
+    }
+    hx.finish();
+    const h = JSON.parse(localStorage.getItem("hexadec-history") || "[]");
+    return {
+      entries: h.length,
+      today: h[h.length - 1],
+      card: document.getElementById("cardBody").textContent.replace(/\s+/g, " "),
+      share: hx.shareText(),
+      score: hx.finalScore(),
+    };
+  });
+  ok("today was written to the history", done.entries === 2 && done.today.s === done.score,
+    JSON.stringify(done.today));
+  ok("the card shows a two day streak", /2 day streak/.test(done.card), done.card.slice(0, 220));
+  ok("the card shows a personal best and a count",
+    /Best/.test(done.card) && /2 played/.test(done.card), done.card.slice(0, 260));
+  ok("the share text mentions the streak", /2 days running/.test(done.share), done.share);
+
+  /* showing it twice must not inflate anything */
+  const again = await page.evaluate(() => {
+    window.__hx.finish();
+    return JSON.parse(localStorage.getItem("hexadec-history") || "[]").length;
+  });
+  ok("reopening the card does not add a second row for today", again === 2, String(again));
+
+  ok("no page errors", errors.length === 0, errors.join(" | "));
+  await page.close();
+}
+
 await browser.close();
 console.log(failures ? `\n${failures} failure(s)\n` : "\nAll checks passed\n");
 process.exit(failures ? 1 : 0);
