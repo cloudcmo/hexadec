@@ -23,6 +23,14 @@
  * ⚠️ Regenerate whenever the tile values, DOWN_MULT, the premium templates, the
  * dictionary or the gates change — every one of them moves `max`, and a stale
  * maximum quietly lies to every player about how well they did.
+ *
+ * DAYS ALREADY PLAYED ARE NEVER REGENERATED. If public/days.js already starts
+ * on the requested date, every row up to and including today is copied across
+ * untouched and only tomorrow onwards is rebuilt. Changing the dictionary
+ * changes which racks pass the gates, so without this a rebuild would swap the
+ * tiles out from under anyone midway through today's puzzle, and silently
+ * restate the maximum that yesterday's players were already given. Pass
+ * --fresh to rebuild the lot anyway.
  */
 
 import fs from "node:fs";
@@ -36,8 +44,35 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, "..");
 const OUT = path.join(ROOT, "public", "days.js");
 
-const COUNT = parseInt(process.argv[2] || "400", 10);
-const START = process.argv[3] || "2026-09-15";
+const ARGS = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+const FRESH = process.argv.includes("--fresh");
+const COUNT = parseInt(ARGS[0] || "400", 10);
+const START = ARGS[1] || "2026-09-15";
+
+const todayISO = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit",
+}).format(new Date());
+
+/* Rows for days that have already been served. Copied across verbatim. */
+function existingDays() {
+  if (FRESH || !fs.existsSync(OUT)) return null;
+  try {
+    const text = fs.readFileSync(OUT, "utf8");
+    const from = text.match(/DAYS_FROM = "(\d{4}-\d{2}-\d{2})"/);
+    if (!from || from[1] !== START) return null;
+    const tiles = text.match(/TILES = "([a-z ]+)"/)[1].split(" ");
+    const layouts = JSON.parse(text.match(/LAYOUTS = (\[[^\]]*\])/)[1]);
+    const maxes = JSON.parse(text.match(/MAXES = (\[[^\]]*\])/)[1]);
+    const pars = JSON.parse(text.match(/PARS = (\[[^\]]*\])/)[1]);
+    const n = Math.round((Date.parse(todayISO + "T12:00:00Z") - Date.parse(START + "T12:00:00Z")) / 86400000) + 1;
+    const keep = Math.max(0, Math.min(n, tiles.length));
+    return keep > 0 ? { tiles: tiles.slice(0, keep), layouts: layouts.slice(0, keep),
+      maxes: maxes.slice(0, keep), pars: pars.slice(0, keep), keep } : null;
+  } catch (e) {
+    console.warn("could not read the existing table, rebuilding it all:", e.message);
+    return null;
+  }
+}
 
 const fours = FOURS.split(" ");
 const wordSet = new Set([...fours, ...THREES.split(" "), ...TWOS.split(" ")]);
@@ -51,9 +86,16 @@ const maxes = [];
 const pars = [];
 const misses = [];
 
-let d = new Date(START + "T12:00:00Z");
+const kept = existingDays();
+if (kept) {
+  tiles.push(...kept.tiles); layouts.push(...kept.layouts);
+  maxes.push(...kept.maxes); pars.push(...kept.pars);
+  console.log(`keeping ${kept.keep} day(s) already served, through ${todayISO}; rebuilding from tomorrow`);
+}
+
+let d = new Date(Date.parse(START + "T12:00:00Z") + tiles.length * 86400000);
 const t0 = Date.now();
-for (let i = 0; i < COUNT; i++) {
+for (let i = tiles.length; i < COUNT; i++) {
   const date = d.toISOString().slice(0, 10);
   const day = buildDay(date, common, fours, isWord);
   if (!day) {

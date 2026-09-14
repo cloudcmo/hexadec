@@ -142,6 +142,19 @@ gates in `tools/day.mjs` all move `max`. A stale maximum quietly lies to every
 player about how well they did, and nothing will fail loudly. `npm run check`
 section 5 catches it — it recomputes a sample of shipped days and compares.
 
+### Days already served are never regenerated
+
+`npm run days` copies every row up to and including today straight out of the
+existing table and rebuilds only from tomorrow. Changing the dictionary changes
+which racks pass the gates, so without this a rebuild would swap the tiles out
+from under anyone midway through today's puzzle. `--fresh` overrides it.
+
+One consequence, and `npm run check` reports it: after a dictionary change a
+served day's shipped maximum can be *lower* than the engine now computes, since
+the ceiling rose after the day was played. That is harmless — the day cannot be
+replayed. A shipped maximum **higher** than the true one would be a lie in the
+harsh direction, and that is a test failure.
+
 ### The one failure mode
 
 The table is finite. It runs out on the date in the header of `days.js`, and
@@ -260,9 +273,29 @@ Three lists come out of it:
 The target pool is what keeps a day fair: the four words it was built from are
 always ordinary vocabulary, even though obscure words remain playable.
 
-**If a player reports a real word being refused**, delete that line from
-`tools/data/junk4.txt` and run `npm run words`, then `npm run days` — never
-widen the dictionary wholesale.
+### ⚠️ SCOWL is British, and that leaves two holes
+
+Found the hard way on 14 Sept, when **FETE** was refused in play. Neither hole
+was a filtering mistake at this end; both are properties of the source:
+
+- It stores naturalised loanwords **accented** — café, fête, épée — and the
+  3-8 letter extract keeps only `[a-z]`, so the spellings people actually type
+  are absent.
+- Being British, it carries GREY but not GRAY, MOULD but not MOLD.
+
+`tools/data/extra4.txt` and `extra3.txt` add them back: 13 fours and 3 threes,
+merged into the **play dictionary only**, never the target pool. They should be
+accepted, but a day should not be built around WIFI or EPEE.
+
+The gap turned out to be small. A probe of 817 everyday four-letter words found
+only two genuine misses (CAFE and FETE) plus the US spellings; the three- and
+two-letter lists had none at all. Worth re-running that probe if the source ever
+changes.
+
+**If a player reports a real word being refused**, first check whether it is in
+`tools/data/junk4.txt` (binned here) or simply absent from the source (add it to
+`extra4.txt`). Then `npm run words`, then `npm run days` — never widen the
+dictionary wholesale.
 
 Blocklist in `tools/data/offensive.txt`, same policy as the other Guff games:
 never playable, and `npm run check` asserts none of it leaked back in.

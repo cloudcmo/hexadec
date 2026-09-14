@@ -148,6 +148,28 @@ console.log("\n5. The day table");
   ok("sampled days are solvable", unsolvable === 0, `${unsolvable} with no solution`);
   ok("sampled maxima match this engine (days.js is not stale)", stale === 0,
     `${stale} differ — run: npm run days`);
+
+  /* Days already served are deliberately NOT regenerated (see build-days.mjs),
+     so after a dictionary change their maxima can drift. Two directions, two
+     meanings: a shipped maximum BELOW the true one is harmless — the ceiling
+     rose after the day was played and nobody can replay it. A shipped maximum
+     ABOVE the true one is a lie in the harsh direction, and means the table is
+     genuinely stale. Only the second is a failure. */
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+  const served = Math.min(TILES.length, Math.max(0, dayIndex(today) + 1));
+  let over = 0, under = [];
+  for (let i = 0; i < served; i++) {
+    const rack = TILES[i];
+    const { best } = E.maximise(rack, E.makeableWords(rack, fours), E.layoutFrom(LAYOUTS[i]), isWord);
+    if (MAXES[i] > best) over++;
+    else if (MAXES[i] < best) under.push(`${i}: ${MAXES[i]}→${best}`);
+  }
+  ok(`no served day overstates its maximum (${served} checked)`, over === 0, `${over} do`);
+  if (under.length) {
+    console.log(`    note: ${under.length} served day(s) understate it, which is harmless — ${under.join(", ")}`);
+  }
 }
 
 console.log(fails ? `\n${fails} failure(s)\n` : "\nAll checks passed\n");

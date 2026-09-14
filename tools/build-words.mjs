@@ -20,6 +20,18 @@
  * property and cannot be redistributed. SCOWL licence: free use with notice,
  * http://wordlist.aspell.net/scowl-readme/
  *
+ * SCOWL is a BRITISH list, and two whole classes of ordinary word are missing
+ * from it as a result. It stores naturalised loanwords in their accented form
+ * (café, fête, épée), and the 3-8 letter extract keeps only [a-z], so the
+ * unaccented spellings people actually type are absent. And being British, it
+ * carries GREY but not GRAY, MOULD but not MOLD. Neither is a filtering
+ * mistake at this end; both would refuse a word the player spelled correctly,
+ * which is the worst thing a word game can do. tools/data/extra4.txt and
+ * extra3.txt add them back. Found when FETE was refused in play, 14 Sept.
+ *
+ * Extras go into the PLAY dictionary only, never the target pool: they should
+ * be accepted, but a day should not be built around WIFI or EPEE.
+ *
  * SCOWL at level 80 carries a lot that is not a word for our purposes: ACCT,
  * BLVD, DEPT, ECOL, SHPT, RONG, TIRR, YOHO. Those are listed in
  * tools/data/junk4.txt and junk3.txt and removed here. If a player ever
@@ -105,9 +117,13 @@ const junk4 = new Set(readList(path.join(DATA, "junk4.txt")));
 const junk3 = new Set(readList(path.join(DATA, "junk3.txt")));
 const offensive = new Set(readList(path.join(DATA, "offensive.txt")));
 const common4src = new Set(readList(path.join(DATA, "common4.txt")));
+const extra4 = readList(path.join(DATA, "extra4.txt"));
+const extra3 = readList(path.join(DATA, "extra3.txt"));
 
-const fours = src.filter((w) => /^[a-z]{4}$/.test(w) && !junk4.has(w) && !offensive.has(w));
-const threes = src.filter((w) => /^[a-z]{3}$/.test(w) && !junk3.has(w) && !offensive.has(w));
+const fours = [...src, ...extra4]
+  .filter((w) => /^[a-z]{4}$/.test(w) && !junk4.has(w) && !offensive.has(w));
+const threes = [...src, ...extra3]
+  .filter((w) => /^[a-z]{3}$/.test(w) && !junk3.has(w) && !offensive.has(w));
 const twos = TWOS.filter((w) => !offensive.has(w));
 
 const F = [...new Set(fours)].sort();
@@ -156,6 +172,8 @@ export const TWOS = "${T2.join(" ")}";
 fs.writeFileSync(OUT, header + body);
 
 const kb = (fs.statSync(OUT).size / 1024).toFixed(1);
+const added4 = extra4.filter((w) => fourSet.has(w)).length;
 console.log(`public/words.js written: ${F.length} fours, ${T3.length} threes, ${T2.length} twos (${kb}KB)`);
+console.log(`supplement: ${added4} of ${extra4.length} extra fours and ${extra3.length} extra threes merged in`);
 console.log(`target pool: ${common4.length} common four-letter words`);
 console.log(`letter frequency: ${dist}`);
