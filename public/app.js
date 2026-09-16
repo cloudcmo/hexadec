@@ -56,6 +56,11 @@ const el = (tag, cls, html) => {
   return n;
 };
 
+/* Someone who has asked their machine for less movement gets the result of a
+   shuffle without the performance of one. Checked live, not once at boot, so a
+   change of setting takes effect without a reload. */
+const CALM = window.matchMedia("(prefers-reduced-motion: reduce)");
+
 /* ---------------------------------------------------------------------------
  * The day
  * ------------------------------------------------------------------------- */
@@ -177,6 +182,7 @@ function tileNode(t, cls, tag) {
     n.type = "button";
     n.setAttribute("aria-label", `${t.ch.toUpperCase()}, ${t.val} point${t.val === 1 ? "" : "s"}`);
   }
+  n.dataset.id = t.id;          // so a shuffle can find where this tile was
   n.appendChild(el("span", "ch", t.ch.toUpperCase()));
   n.appendChild(el("span", "val", String(t.val)));
   return n;
@@ -321,7 +327,17 @@ function preview() {
    the game is over. The 20 points are the regulator, not the timing. */
 function paintExtras() {
   $("extraBtns").style.display =
-    (!S.ended && !S.helped && (S.running || S.ms > 0)) ? "flex" : "none";
+    (!S.ended && (!S.helped || stuckLeaving) && (S.running || S.ms > 0)) ? "flex" : "none";
+}
+/* GuffBot lives on the I'm stuck button. When it is pressed he shrugs, and the
+   button waits for the shrug to finish before it goes. Not saved: it is a moment,
+   not state. */
+let stuckLeaving = false;
+function stuckShrug() {
+  const b = $("btnStuck");
+  stuckLeaving = true;
+  b.classList.add("shrug");
+  setTimeout(() => { stuckLeaving = false; b.classList.remove("shrug"); paintExtras(); }, 650);
 }
 
 function repaint() {
@@ -374,9 +390,57 @@ function clearStage() {
   paintTray(); paintSlots(); preview();
 }
 
+/* Shuffling the tray, with a bit of theatre.
+ *
+ * A shuffle that just repaints is correct and unreadable: sixteen letters swap
+ * places at once and you have to re-scan the whole row to find out what
+ * happened. So every tile is animated from where it was to where it lands — a
+ * FLIP: measure first, repaint, then play the difference backwards — lifted and
+ * tilted on the way, and staggered left to right so the eye follows a wave
+ * rather than a jump cut. You can see that nothing was taken away, which is the
+ * thing a shuffle most needs to say.
+ *
+ * Every fifth press the tiles take the long way round with a full tumble and
+ * the button's arrows go twice round. It changes nothing whatsoever. That is
+ * the point of it. */
+let mixes = 0;
+
 function mix() {
+  if (S.ended) return;
+  const tray = $("tray");
+  const before = new Map();
+  for (const n of tray.children) before.set(n.dataset.id, n.getBoundingClientRect());
+
   S.order = E.shuffled(S.order, Math.random);
   paintTray();
+
+  const showy = (++mixes % 5 === 0);
+  const btn = $("btnMix");
+  btn.classList.remove("spin", "spin-big");
+  void btn.offsetWidth;                       // restart the animation, don't queue it
+  btn.classList.add(showy ? "spin-big" : "spin");
+
+  if (CALM.matches) return;
+
+  [...tray.children].forEach((n, i) => {
+    const from = before.get(n.dataset.id);
+    if (!from) return;
+    const to = n.getBoundingClientRect();
+    const dx = from.left - to.left, dy = from.top - to.top;
+    if (!dx && !dy) return;
+    const turn = showy ? 360 : (dx > 0 ? -15 : 15);
+    n.animate([
+      { transform: `translate(${dx}px, ${dy}px) rotate(0deg) scale(1)` },
+      { transform: `translate(${dx * 0.45}px, ${dy * 0.45 - 11}px) rotate(${turn * 0.55}deg) scale(1.12)`,
+        offset: 0.55 },
+      { transform: "translate(0, 0) rotate(0deg) scale(1)" },
+    ], {
+      duration: showy ? 620 : 430,
+      delay: i * 22,
+      easing: "cubic-bezier(.24,1.2,.36,1)",
+      fill: "backwards",
+    });
+  });
 }
 
 function placeWord() {
@@ -481,6 +545,7 @@ function useStuck() {
      word that leaves a way home. Every shipped day is solvable from an empty
      grid, so this always terminates with a suggestion. */
   if (S.helped || S.ended) return;   // one to a customer
+  stuckShrug();
   let removed = 0;
   let pick = null;
   while (true) {

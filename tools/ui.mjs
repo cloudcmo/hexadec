@@ -13,8 +13,9 @@
  * falling below the fold on a small phone; that a word can be built, placed and
  * taken back; that score is a pure function of the grid and cannot be farmed by
  * placing and removing; that column bonuses fire; that a finished day survives a
- * reload; that the tray does not reflow while a word is being chosen; and that
- * I'm stuck can be used once and costs 20.
+ * reload; that the tray does not reflow while a word is being chosen; that I'm
+ * stuck can be used once and costs 20; and that shuffling the tray cannot lose
+ * a tile or a half-typed word.
  */
 
 import { chromium } from "playwright";
@@ -401,6 +402,74 @@ console.log("\n6. Streak, keyboard, labels and premium pips");
   ok("reopening the card does not add a second row for today", again === 2, String(again));
 
   ok("no page errors", errors.length === 0, errors.join(" | "));
+  await page.close();
+}
+
+console.log("\n7. Shuffle");
+/* The animation is decoration and is not worth asserting frame by frame. What
+   is worth asserting is that it cannot lose a tile, cannot throw away a word
+   you are halfway through typing, leaves the tiles square when it settles, and
+   does not push PLACE WORD onto two lines on a small phone — which it did on
+   the first attempt, at 375px, with four pixels in it. */
+for (const width of [320, 375, 390]) {
+  const page = await browser.newPage({ viewport: { width, height: 700 } });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(BASE, { waitUntil: "networkidle" });
+  await page.waitForSelector("#tray .tile");
+
+  const heights = await page.evaluate(() => ["btnPlay", "btnClear", "btnMix"]
+    .map((id) => Math.round(document.getElementById(id).getBoundingClientRect().height)));
+  ok(`${width}: the button row stays on one line`, heights.every((h) => h <= 46), heights.join("/"));
+
+  const before = await page.$$eval("#tray .tile", (ns) => ns.map((n) => n.dataset.id));
+  await page.click("#btnMix");
+  ok(`${width}: the button's arrows turn`,
+    /spin/.test(await page.$eval("#btnMix", (n) => n.className)));
+  await page.waitForTimeout(900);
+  const after = await page.$$eval("#tray .tile", (ns) => ns.map((n) => n.dataset.id));
+  ok(`${width}: the same sixteen tiles come back`,
+    after.length === 16 && [...after].sort().join() === [...before].sort().join());
+  ok(`${width}: in a different order`, after.join() !== before.join());
+  ok(`${width}: and they settle square`, await page.$$eval("#tray .tile", (ns) =>
+    ns.every((n) => ["none", "matrix(1, 0, 0, 1, 0, 0)"].includes(getComputedStyle(n).transform))));
+
+  /* Every fifth press is the showy one. It does nothing. */
+  for (let i = 0; i < 4; i++) { await page.click("#btnMix"); await page.waitForTimeout(760); }
+  ok(`${width}: every fifth press is the big tumble`,
+    /spin-big/.test(await page.$eval("#btnMix", (n) => n.className)));
+  await page.waitForTimeout(900);
+
+  /* The reason the tray does not close its gaps mid-word applies here too. */
+  await page.click("#tray .tile:not(.ghost)");
+  await page.click("#tray .tile:not(.ghost)");
+  const staged = await page.$$eval("#slots .tile .ch", (n) => n.map((x) => x.textContent));
+  await page.click("#btnMix");
+  await page.waitForTimeout(800);
+  const still = await page.$$eval("#slots .tile .ch", (n) => n.map((x) => x.textContent));
+  ok(`${width}: a half-typed word survives a shuffle`,
+    staged.length === 2 && staged.join() === still.join(), `${staged} -> ${still}`);
+  ok(`${width}: and the staged tiles keep their seats`,
+    (await page.$$eval("#tray .tile.ghost", (n) => n.length)) === 2);
+
+  ok(`${width}: no page errors`, errors.length === 0, errors.join(" | "));
+  await page.close();
+}
+{
+  /* Asked for less movement: the shuffle still shuffles, silently. */
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: "reduce" });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(BASE, { waitUntil: "networkidle" });
+  await page.waitForSelector("#tray .tile");
+  const before = await page.$$eval("#tray .tile", (ns) => ns.map((n) => n.dataset.id));
+  await page.click("#btnMix");
+  await page.waitForTimeout(300);
+  const after = await page.$$eval("#tray .tile", (ns) => ns.map((n) => n.dataset.id));
+  ok("reduced motion: it still shuffles", after.length === 16 && after.join() !== before.join());
+  ok("reduced motion: with nothing animating",
+    (await page.evaluate(() => document.getAnimations().length)) === 0);
+  ok("reduced motion: no page errors", errors.length === 0, errors.join(" | "));
   await page.close();
 }
 

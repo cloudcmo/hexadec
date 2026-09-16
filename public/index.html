@@ -171,9 +171,13 @@ header{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
    shuffles under your thumb mid-word. See paintTray in app.js. */
 #tray .tile.ghost{visibility:hidden}
 .btn .cost{font-size:12px;opacity:.75;letter-spacing:.04em}
+.btn .bot{display:inline-block;font-size:17px;line-height:1;margin-right:2px;transform-origin:50% 85%;vertical-align:-2px}
+#btnStuck.shrug .bot{animation:botShrug .6s ease}
+@keyframes botShrug{0%{transform:translateY(0) rotate(0)}30%{transform:translateY(-3px) rotate(-12deg)}55%{transform:translateY(-3px) rotate(12deg)}80%{transform:translateY(0) rotate(-4deg)}100%{transform:translateY(0) rotate(0)}}
+@media (prefers-reduced-motion:reduce){#btnStuck.shrug .bot{animation:none}}
 
 /* ---- buttons ----------------------------------------------------------- */
-.row-btns{display:flex;gap:8px}
+.row-btns{display:flex;gap:6px}
 .btn{flex:1;border-radius:11px;padding:12px 10px;font-weight:700;font-size:14px;
   letter-spacing:.1em;text-transform:uppercase;text-align:center;
   background:var(--cream);border:1px solid var(--cream-edge);
@@ -206,8 +210,22 @@ header{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
 .shake{animation:shake .34s}
 @keyframes shake{0%,100%{transform:none}20%{transform:translateX(-6px)}
   40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(3px)}}
+/* The shuffle button's arrows turn with the tiles. Twice round on the fifth
+   press, which is the same tumble the tiles do and means nothing at all. */
+#btnMix .mixi{display:inline-block;transform-origin:50% 50%}
+/* Tighter than the other small buttons: at 375px the three of them together
+   are within a few pixels of the width of the tray, and one pixel over puts
+   PLACE WORD onto two lines. Below 360px the word goes and the arrows carry
+   it alone (the button keeps its aria-label either way). */
+#btnMix{padding-left:10px;padding-right:10px;letter-spacing:.03em;font-size:13px}
+@media (max-width:360px){ #btnMix .mixt{display:none} }
+#btnMix.spin .mixi{animation:mixspin .43s cubic-bezier(.3,1.35,.4,1)}
+#btnMix.spin-big .mixi{animation:mixspin2 .62s cubic-bezier(.3,1.35,.4,1)}
+@keyframes mixspin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+@keyframes mixspin2{from{transform:rotate(0)}to{transform:rotate(720deg)}}
 @media (prefers-reduced-motion:reduce){
   .chip,.cell.flash,.cell.downlit,.tile.drop,.shake{animation:none!important}
+  #btnMix.spin .mixi,#btnMix.spin-big .mixi{animation:none!important}
   .chip{opacity:1}
 }
 
@@ -302,13 +320,14 @@ footer a{color:var(--ink-soft)}
     <div class="row-btns">
       <button class="btn primary" id="btnPlay" disabled>Place word</button>
       <button class="btn small" id="btnClear" title="Send the staged tiles back">Clear</button>
-      <button class="btn small" id="btnMix" title="Rearrange the tray">Mix</button>
+      <button class="btn small" id="btnMix" title="Shuffle the tiles you have left"
+        aria-label="Shuffle your remaining tiles"><span class="mixi" aria-hidden="true">⇄</span><span class="mixt"> Shuffle</span></button>
     </div>
 
     <div id="tray" aria-label="The tiles still in your hand"></div>
 
     <div class="row-btns" id="extraBtns" style="display:none">
-      <button class="btn" id="btnStuck">I'm stuck &nbsp;<span class="cost">−20</span></button>
+      <button class="btn" id="btnStuck"><span class="bot" aria-hidden="true">🤖</span> I'm stuck &nbsp;<span class="cost">−20</span></button>
     </div>
   </div>
 
