@@ -175,6 +175,7 @@ header{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
 #btnStuck.shrug .bot{animation:botShrug .6s ease}
 @keyframes botShrug{0%{transform:translateY(0) rotate(0)}30%{transform:translateY(-3px) rotate(-12deg)}55%{transform:translateY(-3px) rotate(12deg)}80%{transform:translateY(0) rotate(-4deg)}100%{transform:translateY(0) rotate(0)}}
 @media (prefers-reduced-motion:reduce){#btnStuck.shrug .bot{animation:none}}
+.gbimg{display:inline-block;width:1.15em;height:1.15em;vertical-align:-.22em;object-fit:contain;border:0;pointer-events:none;-webkit-user-drag:none;user-select:none} /* GuffBot as a picture, sized to the emoji he replaced (19 Sept 2026) */
 
 /* ---- buttons ----------------------------------------------------------- */
 .row-btns{display:flex;gap:6px}
@@ -327,7 +328,7 @@ footer a{color:var(--ink-soft)}
     <div id="tray" aria-label="The tiles still in your hand"></div>
 
     <div class="row-btns" id="extraBtns" style="display:none">
-      <button class="btn" id="btnStuck"><span class="bot" aria-hidden="true">🤖</span> I'm stuck &nbsp;<span class="cost">−20</span></button>
+      <button class="btn" id="btnStuck"><span class="bot" aria-hidden="true"><img class="gbimg" src="/guffbot.webp" alt="" width="20" height="20"></span> I'm stuck &nbsp;<span class="cost">−20</span></button>
     </div>
   </div>
 
