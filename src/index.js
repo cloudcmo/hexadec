@@ -231,8 +231,8 @@ async function sendWelcome(apiKey, email) {
     </div>
     <p style="font-size:14px;line-height:1.7;margin:0 0 14px;color:#4a4034;">
       You're on the list. Every Friday we send one free games email &mdash; the week's
-      best from Hexadec, Guffinoes, the pub quiz, Whenly, What Word, Groupie, Twentee
-      and Spellbound. One email a week, never more.
+      best from Hexadec, the pub quiz, Whenly, Groupie, Spellbound, What Word,
+      Words and Guff Daily and Guffinoes. One email a week, never more.
     </p>
     <p style="font-size:14px;line-height:1.7;margin:0 0 22px;color:#4a4034;">
       Can't wait until Friday? Today's sixteen are already on the table.
