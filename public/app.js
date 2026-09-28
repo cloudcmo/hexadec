@@ -259,6 +259,7 @@ function paintTray() {
     const held = staged.has(id);
     const n = tileNode(t, held ? "ghost" : "", "button");
     if (held) { n.disabled = true; n.setAttribute("aria-hidden", "true"); }
+    if (drag && drag.live && drag.id === id) { n.classList.add("hole"); drag.node = n; }
     else n.addEventListener("click", () => stage(id));
     tray.appendChild(n);
   }
@@ -406,13 +407,14 @@ function clearStage() {
 let mixes = 0;
 
 function mix() {
-  if (S.ended) return;
+  if (S.ended || drag) return;
   const tray = $("tray");
   const before = new Map();
   for (const n of tray.children) before.set(n.dataset.id, n.getBoundingClientRect());
 
   S.order = E.shuffled(S.order, Math.random);
   paintTray();
+  save();
 
   const showy = (++mixes % 5 === 0);
   const btn = $("btnMix");
@@ -441,6 +443,195 @@ function mix() {
       fill: "backwards",
     });
   });
+}
+
+/* ---------------------------------------------------------------------------
+ * Rearranging the tray by hand (28 Sept 2026)
+ *
+ * Press a tile and drag it: it lifts off the tray, the seat it left shows as an
+ * empty hollow, and the others hop aside to make room as you go. Let go and it
+ * drops into the hollow with a little squash. A press that does not travel
+ * DRAG_START pixels is still a tap and stages the tile exactly as before, so
+ * the old way of playing is untouched.
+ *
+ * Deliberate choices:
+ * - A tile only changes seat when the lifted tile's centre is well inside
+ *   another tile (SEAT_INSET off every edge). Near a boundary nothing happens,
+ *   so the row does not flicker back and forth under a wobbling thumb.
+ * - On a phone the tile rides above the thumb (LIFT tile-heights), because a
+ *   tile under your thumb is a tile you cannot see. Seat-finding follows the
+ *   tile, not the finger, so where it looks like it will land is where it lands.
+ * - Rearranging starts the clock, the same as the first tap. Otherwise the rack
+ *   could be sorted into four words before the five minutes began.
+ * - While a drag is live the tiles are moved, never rebuilt, and the pointer is
+ *   captured by the tray itself: iOS stops delivering moves once the element
+ *   under the finger leaves the page.
+ * ------------------------------------------------------------------------- */
+const DRAG_START = 7;      // px of travel before a press is a drag, not a tap
+const SEAT_INSET = 0.2;    // share of a tile's width/height that does nothing
+const LIFT = 0.8;          // tile-heights above a touching finger
+let drag = null;
+let swallowClickUntil = 0;
+
+const buzz = (ms) => { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {} };
+
+function onTrayDown(e) {
+  if (S.ended || drag || (e.pointerType === "mouse" && e.button !== 0)) return;
+  const n = e.target.closest && e.target.closest("#tray .tile");
+  if (!n || n.disabled || n.classList.contains("ghost")) return;
+  drag = {
+    id: +n.dataset.id, node: n, pid: e.pointerId, touch: e.pointerType !== "mouse",
+    x0: e.clientX, y0: e.clientY, lastX: e.clientX, tilt: 0,
+    live: false, moved: false, settling: false,
+  };
+}
+
+function onTrayMove(e) {
+  if (!drag || e.pointerId !== drag.pid || drag.settling) return;
+  if (!drag.live) {
+    if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < DRAG_START) return;
+    liftTile();
+  }
+  e.preventDefault();
+  steerFloat(e.clientX, e.clientY);
+  findSeat();
+}
+
+function onTrayUp(e) {
+  if (!drag || e.pointerId !== drag.pid || drag.settling) return;
+  if (!drag.live) { drag = null; return; }       // a tap: the click stages it
+  swallowClickUntil = performance.now() + 400;
+  dropTile();
+}
+
+function liftTile() {
+  const tray = $("tray");
+  const n = drag.node;
+  const r = n.getBoundingClientRect();
+  drag.live = true;
+  drag.w = r.width; drag.h = r.height;
+  drag.offX = drag.x0 - r.left;
+  drag.offY = drag.y0 - r.top + (drag.touch ? r.height * LIFT : 0);
+  try { tray.setPointerCapture(drag.pid); } catch (err) {}
+  startClock();
+
+  const f = tileNode(tileById(drag.id), "floating");
+  f.setAttribute("aria-hidden", "true");
+  f.style.width = r.width + "px";
+  f.style.height = r.height + "px";
+  f.style.left = r.left + "px";
+  f.style.top = r.top + "px";
+  document.body.appendChild(f);
+  drag.float = f;
+  n.classList.add("hole");
+  tray.classList.add("sorting");
+  buzz(8);
+  if (!CALM.matches) {
+    /* Rise off the tray rather than teleport above the thumb. */
+    f.classList.add("lifting");
+    setTimeout(() => f.classList.remove("lifting"), 140);
+  }
+  requestAnimationFrame(() => f.classList.add("up"));
+}
+
+function steerFloat(x, y) {
+  const f = drag.float;
+  f.style.left = (x - drag.offX) + "px";
+  f.style.top = (y - drag.offY) + "px";
+  /* Leans into the direction of travel and straightens up when you pause. */
+  const v = x - drag.lastX;
+  drag.lastX = x;
+  drag.tilt = Math.max(-14, Math.min(14, drag.tilt * 0.6 + v * 0.9));
+  f.style.setProperty("--tilt", drag.tilt.toFixed(1) + "deg");
+  clearTimeout(drag.still);
+  drag.still = setTimeout(() => { if (drag && drag.float === f) { drag.tilt = 0; f.style.setProperty("--tilt", "0deg"); } }, 90);
+}
+
+/* Layout positions (offsetLeft/Top), not on-screen rects, so a neighbour that
+   is still mid-hop cannot be mistaken for the seat it is leaving. */
+function findSeat() {
+  const tray = $("tray");
+  const cx = parseFloat(drag.float.style.left) + drag.w / 2;
+  const cy = parseFloat(drag.float.style.top) + drag.h / 2;
+  const tr = tray.getBoundingClientRect();
+  const ox = tr.left + tray.clientLeft, oy = tr.top + tray.clientTop;
+  for (const n of tray.children) {
+    if (n === drag.node) continue;
+    const L = ox + n.offsetLeft, T = oy + n.offsetTop, W = n.offsetWidth, H = n.offsetHeight;
+    const ix = W * SEAT_INSET, iy = H * SEAT_INSET;
+    if (cx > L + ix && cx < L + W - ix && cy > T + iy && cy < T + H - iy) {
+      reseat(+n.dataset.id);
+      return;
+    }
+  }
+}
+
+function reseat(targetId) {
+  const tray = $("tray");
+  const before = new Map();
+  for (const n of tray.children) before.set(n.dataset.id, n.getBoundingClientRect());
+  for (const n of tray.children) for (const a of n.getAnimations()) a.cancel();
+
+  const from = S.order.indexOf(drag.id), to = S.order.indexOf(targetId);
+  S.order.splice(from, 1);
+  S.order.splice(to, 0, drag.id);
+  arrangeTray();
+  drag.moved = true;
+  buzz(4);
+  if (CALM.matches) return;
+
+  for (const n of tray.children) {
+    if (n === drag.node) continue;
+    const a = before.get(n.dataset.id);
+    const b = n.getBoundingClientRect();
+    const dx = a.left - b.left, dy = a.top - b.top;
+    if (!dx && !dy) continue;
+    n.animate([
+      { transform: `translate(${dx}px, ${dy}px)` },
+      { transform: `translate(${dx * 0.4}px, ${dy * 0.4 - 5}px)`, offset: 0.5 },
+      { transform: "translate(0, 0)" },
+    ], { duration: 200, easing: "cubic-bezier(.25,1.15,.4,1)" });
+  }
+}
+
+/* Put the existing tray nodes into S.order without rebuilding any of them. */
+function arrangeTray() {
+  const tray = $("tray");
+  const byId = new Map([...tray.children].map((n) => [+n.dataset.id, n]));
+  for (const id of S.order) {
+    const n = byId.get(id);
+    if (n) tray.appendChild(n);
+  }
+}
+
+function dropTile() {
+  const d = drag;
+  d.settling = true;
+  clearTimeout(d.still);
+  try { $("tray").releasePointerCapture(d.pid); } catch (e) {}
+  const f = d.float;
+  const done = () => {
+    f.remove();
+    $("tray").classList.remove("sorting");
+    drag = null;
+    if (!d.node.isConnected) paintTray();
+    else {
+      d.node.classList.remove("hole");
+      if (!CALM.matches) {
+        d.node.classList.add("settle");
+        setTimeout(() => d.node.classList.remove("settle"), 320);
+      }
+    }
+    if (d.moved) save();
+  };
+  if (CALM.matches) { done(); return; }
+  const to = d.node.getBoundingClientRect();
+  f.classList.remove("up", "lifting");
+  f.classList.add("landing");
+  f.style.setProperty("--tilt", "0deg");
+  f.style.left = to.left + "px";
+  f.style.top = to.top + "px";
+  setTimeout(done, 170);
 }
 
 function placeWord() {
@@ -947,7 +1138,7 @@ async function subscribe(ev) {
  * the end card is up.
  * ------------------------------------------------------------------------- */
 function onKey(e) {
-  if (S.ended || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (S.ended || drag || e.metaKey || e.ctrlKey || e.altKey) return;
   if ($("overlay").classList.contains("on")) return;
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
@@ -993,6 +1184,36 @@ function homeScreenCard() {
   $("btnOk").addEventListener("click", () => $("overlay").classList.remove("on"));
 }
 
+/* A one-off NEW card for the rack rearranging (28 Sept 2026). Carl's call:
+   each returning player sees it once, on their next visit, whenever that is.
+   Never on a day already finished. Someone who has never played before gets
+   no card (to them nothing is new, and there is no first-visit rules panel
+   either); they are simply marked as told so it cannot surprise them later.
+   Skipped under automation (navigator.webdriver) so npm run ui is not left
+   clicking at a card that covers the tray. */
+const NEWS_KEY = "hexadec-news-rearrange";
+function newsCard(returning) {
+  if (S.ended || navigator.webdriver) return;
+  try {
+    if (localStorage.getItem(NEWS_KEY)) return;
+    localStorage.setItem(NEWS_KEY, "1");
+  } catch (e) { return; }
+  if (!returning) return;
+  $("cardBody").innerHTML = `
+    <div class="news">
+      <span class="newtag">NEW</span>
+      <h1>Pre-planning</h1>
+      <p>You can arrange the tiles in your rack. Drag one and the others shuffle
+      aside to make room. A quick tap still picks a tile.</p>
+      <div class="newsdemo" aria-hidden="true">
+        <span class="tile nd1"><span class="ch">E</span></span><span class="tile nd2"><span class="ch">A</span></span><span class="tile nd3"><span class="ch">T</span></span><span class="tile nd4"><span class="ch">M</span></span>
+      </div>
+      <button class="btn primary" id="btnNews">Lovely, let me at it</button>
+    </div>`;
+  $("overlay").classList.add("on");
+  $("btnNews").addEventListener("click", () => $("overlay").classList.remove("on"));
+}
+
 function boot() {
   if (!loadDay()) {
     document.getElementById("shell").innerHTML =
@@ -1004,6 +1225,13 @@ function boot() {
   fit();
   buildBoard();
 
+  let returning = false;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("hexadec-") && k !== NEWS_KEY) { returning = true; break; }
+    }
+  } catch (e) {}
   restore();
   $("dateline").textContent = new Date(S.date + "T12:00:00")
     .toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
@@ -1013,6 +1241,15 @@ function boot() {
   $("btnPlay").addEventListener("click", placeWord);
   $("btnClear").addEventListener("click", clearStage);
   $("btnMix").addEventListener("click", mix);
+  const tray = $("tray");
+  tray.addEventListener("pointerdown", onTrayDown);
+  window.addEventListener("pointermove", onTrayMove, { passive: false });
+  window.addEventListener("pointerup", onTrayUp);
+  window.addEventListener("pointercancel", onTrayUp);
+  /* The press that ended a drag must not also stage the tile. */
+  tray.addEventListener("click", (e) => {
+    if (performance.now() < swallowClickUntil) { e.stopPropagation(); e.preventDefault(); }
+  }, true);
   $("btnStuck").addEventListener("click", useStuck);
   $("linkHome").addEventListener("click", (e) => { e.preventDefault(); homeScreenCard(); });
   $("btnClose").addEventListener("click", () => {
@@ -1031,11 +1268,12 @@ function boot() {
 
   if (S.ended) { finish(); }
   else if (S.rows.length === 4) { finish(); }
+  else newsCard(returning);
 }
 
 /* Test and tooling hook, in the family style. */
 window.__hx = {
-  S, E, isWord, FOUR_LIST, currentScore, placeWord, stage, takeBack, useStuck,
+  S, E, isWord, FOUR_LIST, currentScore, placeWord, stage, takeBack, useStuck, dragging: () => !!drag,
   shareText, finish, timeBonus, penalty, finalScore, state: () => ({
     rows: S.rows.map((r) => r.word), score: currentScore().total,
     max: S.max, ended: S.ended, helped: S.helped, takebacks: S.takebacks,

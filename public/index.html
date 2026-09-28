@@ -170,6 +170,50 @@ header{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
 /* A staged tile keeps its seat in the tray rather than vanishing, so nothing
    shuffles under your thumb mid-word. See paintTray in app.js. */
 #tray .tile.ghost{visibility:hidden}
+/* Rearranging by hand (28 Sept 2026). The tray owns its touches so a drag is
+   never mistaken for a scroll, and the seat a lifted tile left is a hollow in
+   the same style as the empty letter slots above. */
+#tray{position:relative}
+#tray .tile{touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;cursor:grab}
+#tray .tile.ghost{cursor:default}
+#tray.sorting .tile{cursor:grabbing}
+#tray .tile.hole{background:rgba(120,90,55,.13);border:1px dashed rgba(120,90,55,.5);
+  box-shadow:inset 0 2px 4px rgba(90,65,35,.18)}
+#tray .tile.hole>*{visibility:hidden}
+.tile.floating{position:fixed;z-index:60;margin:0;pointer-events:none;
+  transform:scale(var(--s,1)) rotate(var(--tilt,0deg));
+  box-shadow:0 2px 0 #d9c7a6,0 12px 20px rgba(70,45,20,.34);
+  transition:transform .14s cubic-bezier(.3,1.5,.5,1)}
+.tile.floating.up{--s:1.22}
+.tile.floating.lifting{transition:transform .14s cubic-bezier(.3,1.5,.5,1),left .12s ease-out,top .12s ease-out}
+.tile.floating.landing{transition:transform .16s ease-out,left .16s cubic-bezier(.3,1.2,.5,1),top .16s cubic-bezier(.3,1.2,.5,1)}
+.tile.floating .ch{font-size:calc(var(--cell)*.36)}
+.tile.floating .val{font-size:calc(var(--cell)*.15);right:3px;bottom:1px}
+#tray .tile.settle{animation:settle .3s cubic-bezier(.3,1.5,.5,1)}
+@keyframes settle{0%{transform:scale(1.1,.86)}55%{transform:scale(.96,1.05)}100%{transform:none}}
+@media (prefers-reduced-motion:reduce){.tile.floating{transition:none!important}#tray .tile.settle{animation:none!important}}
+/* The one-off NEW card (28 Sept 2026): EATM becomes MEAT, on a loop, by the
+   M hopping over the others while they budge up. */
+.news{text-align:center}
+.news p{font-size:14.5px;line-height:1.55;margin:8px 0 14px}
+.newtag{display:inline-block;background:var(--accent);color:#fff8ef;font-weight:800;font-size:12px;
+  letter-spacing:.16em;padding:4px 9px 3px;border-radius:6px;margin-bottom:8px;
+  animation:newpulse 1.6s ease-in-out infinite}
+@keyframes newpulse{0%,100%{transform:scale(1) rotate(-3deg)}50%{transform:scale(1.1) rotate(3deg)}}
+.newsdemo{position:relative;height:52px;width:196px;margin:0 auto 18px}
+.newsdemo .tile{position:absolute;top:4px;width:44px;height:44px;--cell:60px}
+.newsdemo .tile .ch{font-size:24px}
+.newsdemo .nd1{left:0;animation:nd-budge 3.2s ease-in-out infinite}
+.newsdemo .nd2{left:50px;animation:nd-budge 3.2s ease-in-out infinite}
+.newsdemo .nd3{left:100px;animation:nd-budge 3.2s ease-in-out infinite}
+.newsdemo .nd4{left:150px;z-index:2;animation:nd-hop 3.2s cubic-bezier(.3,1.2,.5,1) infinite}
+@keyframes nd-hop{0%,18%{transform:none;box-shadow:0 2px 0 #d9c7a6,0 3px 6px rgba(70,45,20,.22)}
+  26%{transform:translateY(-14px) scale(1.2) rotate(-8deg);box-shadow:0 2px 0 #d9c7a6,0 12px 18px rgba(70,45,20,.3)}
+  52%{transform:translate(-150px,-14px) scale(1.2) rotate(-6deg);box-shadow:0 2px 0 #d9c7a6,0 12px 18px rgba(70,45,20,.3)}
+  60%{transform:translate(-150px,0) scale(1.08,.9)}66%,84%{transform:translate(-150px,0)}
+  100%{transform:none}}
+@keyframes nd-budge{0%,30%{transform:none}46%,84%{transform:translateX(50px)}100%{transform:none}}
+@media (prefers-reduced-motion:reduce){.newtag,.newsdemo .tile{animation:none!important}}
 .btn .cost{font-size:12px;opacity:.75;letter-spacing:.04em}
 .btn .bot{display:inline-block;font-size:17px;line-height:1;margin-right:2px;transform-origin:50% 85%;vertical-align:-2px}
 #btnStuck.shrug .bot{animation:botShrug .6s ease}
@@ -345,6 +389,7 @@ footer a{color:var(--ink-soft)}
         <li>Columns that happen to read as a word score a bonus too, top to bottom. A full four-letter column scores double.</li>
         <li>Finish inside five quiet minutes and you keep a point for every five seconds left, up to 60. There is no clock on screen.</li>
         <li>Properly stuck? <b>I'm stuck</b> finds you a word that still leaves a way home. Once per game, and it costs 20 points.</li>
+        <li>Drag the tiles in your hand to rearrange them. A quick tap still picks one.</li>
         <li>On a keyboard you can simply type the word. Backspace takes a letter back, enter places it, escape clears.</li>
       </ul>
       <div class="key">

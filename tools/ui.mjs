@@ -14,8 +14,9 @@
  * taken back; that score is a pure function of the grid and cannot be farmed by
  * placing and removing; that column bonuses fire; that a finished day survives a
  * reload; that the tray does not reflow while a word is being chosen; that I'm
- * stuck can be used once and costs 20; and that shuffling the tray cannot lose
- * a tile or a half-typed word.
+ * stuck can be used once and costs 20; that shuffling the tray cannot lose
+ * a tile or a half-typed word; and that dragging tiles to rearrange the tray
+ * puts them where they were dropped, is remembered, and leaves a tap a tap.
  */
 
 import { chromium } from "playwright";
@@ -469,6 +470,120 @@ for (const width of [320, 375, 390]) {
   ok("reduced motion: it still shuffles", after.length === 16 && after.join() !== before.join());
   ok("reduced motion: with nothing animating",
     (await page.evaluate(() => document.getAnimations().length)) === 0);
+  ok("reduced motion: no page errors", errors.length === 0, errors.join(" | "));
+  await page.close();
+}
+
+console.log("\n8. Rearranging the tray by hand");
+/* Drag a tile and the rest make room; let go and it stays there. A press that
+   barely moves is still a tap. None of it may lose a tile, stage a tile by
+   accident, disturb a half-built word, or survive a reload in the wrong order. */
+const ids = (page) => page.$$eval("#tray .tile", (ns) => ns.map((n) => +n.dataset.id));
+async function dragTile(page, from, to, steps = 14) {
+  const tiles = await page.$$("#tray .tile");
+  const a = await tiles[from].boundingBox(), b = await tiles[to].boundingBox();
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps });
+  await page.mouse.up();
+  await page.waitForTimeout(750);   // the drop (170ms) and its squash (300ms) finish
+}
+const moved = (arr, from, to) => { const o = arr.slice(); const [x] = o.splice(from, 1); o.splice(to, 0, x); return o; };
+
+for (const width of [320, 375, 390]) {
+  const page = await browser.newPage({ viewport: { width, height: 700 } });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(BASE, { waitUntil: "networkidle" });
+  await page.waitForSelector("#tray .tile");
+
+  const start = await ids(page);
+  await dragTile(page, 0, 5);
+  const one = await ids(page);
+  ok(`${width}: along a row, the tile lands where it was dropped`, one.join() === moved(start, 0, 5).join(),
+    `${start} -> ${one}`);
+  ok(`${width}: and nothing was staged by the drag`, (await page.$$("#slots .tile")).length === 0);
+  ok(`${width}: the clock started`, await page.evaluate(() => window.__hx.S.running));
+  ok(`${width}: no hollow or floating tile left behind`,
+    (await page.$$("#tray .tile.hole, .tile.floating")).length === 0);
+
+  await dragTile(page, 2, 12);
+  const two = await ids(page);
+  ok(`${width}: across rows too`, two.join() === moved(one, 2, 12).join(), `${one} -> ${two}`);
+  ok(`${width}: still sixteen tiles`, two.length === 16 && new Set(two).size === 16);
+  ok(`${width}: and they settle square`, await page.$$eval("#tray .tile", (ns) =>
+    ns.every((n) => ["none", "matrix(1, 0, 0, 1, 0, 0)"].includes(getComputedStyle(n).transform))));
+
+  /* A wobble is a tap. */
+  const t = await (await page.$$("#tray .tile"))[4].boundingBox();
+  await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(t.x + t.width / 2 + 3, t.y + t.height / 2 + 2);
+  await page.mouse.up();
+  await page.waitForTimeout(100);
+  ok(`${width}: a press that barely moves still picks the tile`, (await page.$$("#slots .tile")).length === 1);
+
+  /* Mid-word: the word survives and its seats travel with the order. */
+  await page.click("#tray .tile:not(.ghost)");
+  const word = await page.$$eval("#slots .tile .ch", (n) => n.map((x) => x.textContent).join(""));
+  const live = await page.$$eval("#tray .tile", (ns) => ns.map((n, i) => n.classList.contains("ghost") ? -1 : i).filter((i) => i >= 0));
+  await dragTile(page, live[0], live[live.length - 1]);
+  ok(`${width}: a half-built word survives a rearrange`,
+    word.length === 2 && word === await page.$$eval("#slots .tile .ch", (n) => n.map((x) => x.textContent).join("")));
+  ok(`${width}: and its tiles keep their holes`, (await page.$$("#tray .tile.ghost")).length === 2);
+  await page.keyboard.press("Escape");
+
+  /* Remembered. */
+  const kept = await ids(page);
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector("#tray .tile");
+  ok(`${width}: the arrangement survives a reload`, (await ids(page)).join() === kept.join());
+
+  ok(`${width}: no page errors`, errors.length === 0, errors.join(" | "));
+  await page.close();
+}
+{
+  /* A finger: the tile rides above it, so you can see what you are carrying. */
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(BASE, { waitUntil: "networkidle" });
+  await page.waitForSelector("#tray .tile");
+  const r = await page.evaluate(async () => {
+    const n = document.querySelectorAll("#tray .tile")[1];
+    const b = n.getBoundingClientRect();
+    const x = b.left + b.width / 2, y = b.top + b.height / 2;
+    const ev = (type, dx) => new PointerEvent(type, { pointerId: 7, pointerType: "touch", isPrimary: true,
+      clientX: x + dx, clientY: y, bubbles: true, cancelable: true });
+    n.dispatchEvent(ev("pointerdown", 0));
+    for (let dx = 2; dx <= 20; dx += 2) n.dispatchEvent(ev("pointermove", dx));
+    await new Promise((res) => setTimeout(res, 200));
+    const f = document.querySelector(".tile.floating");
+    const fr = f && f.getBoundingClientRect();
+    const out = { floating: !!f, above: fr ? fr.top + fr.height / 2 < y - b.height * 0.5 : false,
+      hole: !!document.querySelector("#tray .tile.hole") };
+    window.dispatchEvent(ev("pointerup", 20));
+    await new Promise((res) => setTimeout(res, 400));
+    out.clean = !document.querySelector(".tile.floating, #tray .tile.hole");
+    out.staged = document.querySelectorAll("#slots .tile").length;
+    return out;
+  });
+  ok("touch: the tile lifts off the tray", r.floating && r.hole);
+  ok("touch: and rides above the finger", r.above);
+  ok("touch: letting go tidies up without staging anything", r.clean && r.staged === 0, JSON.stringify(r));
+  ok("touch: no page errors", errors.length === 0, errors.join(" | "));
+  await page.close();
+}
+{
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: "reduce" });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(BASE, { waitUntil: "networkidle" });
+  await page.waitForSelector("#tray .tile");
+  const start = await ids(page);
+  await dragTile(page, 0, 3);
+  ok("reduced motion: it still rearranges", (await ids(page)).join() === moved(start, 0, 3).join());
+  ok("reduced motion: with nothing animating", (await page.evaluate(() => document.getAnimations().length)) === 0);
   ok("reduced motion: no page errors", errors.length === 0, errors.join(" | "));
   await page.close();
 }
