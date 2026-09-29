@@ -329,6 +329,12 @@ function preview() {
 function paintExtras() {
   $("extraBtns").style.display =
     (!S.ended && (!S.helped || stuckLeaving) && (S.running || S.ms > 0)) ? "flex" : "none";
+  /* Once the sixteen are down the play controls make no sense, and the end
+     card can be closed. The page must still have a way back to the score. */
+  $("stage").style.display = S.ended ? "none" : "";
+  $("tray").style.display = S.ended ? "none" : "";
+  $("playBtns").style.display = S.ended ? "none" : "";
+  $("doneBtns").style.display = S.ended ? "flex" : "none";
 }
 /* GuffBot lives on the I'm stuck button. When it is pressed he shrugs, and the
    button waits for the shrug to finish before it goes. Not saved: it is a moment,
@@ -986,12 +992,18 @@ function showCard() {
   $("endHome").innerHTML = ios
     ? "Add Hexadec to your home screen: share button → <b>Add to Home Screen</b>. It becomes an app. No shop, no fee, no fuss."
     : "Add Hexadec to your home screen: ⋮ menu → <b>Add to Home screen</b>. It becomes an app. No shop, no fee, no fuss.";
-  $("btnShare").addEventListener("click", doShare);
-  paintDayStats();
-  $("btnBest").addEventListener("click", revealBest);
-  $("subForm").addEventListener("submit", subscribe);
-  barToEnd();
-  tickNext();
+  /* The card is up. Nothing below may take it down again: each extra is on
+     its own, so one failing leaves the score on screen. */
+  const extras = [
+    () => $("btnShare").addEventListener("click", doShare),
+    () => $("btnBest").addEventListener("click", revealBest),
+    () => $("subForm").addEventListener("submit", subscribe),
+    () => paintDayStats(),
+    () => barToEnd(),
+    () => tickNext(),
+  ];
+  for (const f of extras) { try { f(); } catch (e) { console.error(e); } }
+  paintExtras();
 }
 
 /* The best line is recomputed here rather than shipped in days.js, because a
@@ -1251,6 +1263,7 @@ function boot() {
     if (performance.now() < swallowClickUntil) { e.stopPropagation(); e.preventDefault(); }
   }, true);
   $("btnStuck").addEventListener("click", useStuck);
+  $("btnResult").addEventListener("click", finish);
   $("linkHome").addEventListener("click", (e) => { e.preventDefault(); homeScreenCard(); });
   $("btnClose").addEventListener("click", () => {
     $("overlay").classList.remove("on");

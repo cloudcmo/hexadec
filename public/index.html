@@ -362,7 +362,7 @@ footer a{color:var(--ink-soft)}
       </div>
     </div>
 
-    <div class="row-btns">
+    <div class="row-btns" id="playBtns">
       <button class="btn primary" id="btnPlay" disabled>Place word</button>
       <button class="btn small" id="btnClear" title="Send the staged tiles back">Clear</button>
       <button class="btn small" id="btnMix" title="Shuffle the tiles you have left"
@@ -370,6 +370,10 @@ footer a{color:var(--ink-soft)}
     </div>
 
     <div id="tray" aria-label="The tiles still in your hand"></div>
+
+    <div class="row-btns" id="doneBtns" style="display:none">
+      <button class="btn primary" id="btnResult">See your score</button>
+    </div>
 
     <div class="row-btns" id="extraBtns" style="display:none">
       <button class="btn" id="btnStuck"><span class="bot" aria-hidden="true"><img class="gbimg" src="/guffbot.webp" alt="" width="20" height="20"></span> I'm stuck &nbsp;<span class="cost">−20</span></button>
