@@ -1105,6 +1105,7 @@ function paintBar() {
   const pct = Math.round(words / S.max * 100);
   if (window.GuffBar && GuffBar.completedToday) {
     GuffBar.completedToday(slot, {
+      date: S.date,
       score: Math.min(9999, total), max: LEAGUE_MAX,
       display: `${total.toLocaleString()} · ${pct}%`,
     });
