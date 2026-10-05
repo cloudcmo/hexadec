@@ -1107,6 +1107,7 @@ function paintBar() {
     GuffBar.completedToday(slot, {
       date: S.date,
       score: Math.min(9999, total), max: LEAGUE_MAX,
+      perfect: words >= S.max,   // every point on the board: the bar throws a party (5 Oct 2026)
       display: `${total.toLocaleString()} · ${pct}%`,
     });
   } else if (!window.GuffBar) {
