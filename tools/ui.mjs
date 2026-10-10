@@ -15,8 +15,11 @@
  * placing and removing; that column bonuses fire; that a finished day survives a
  * reload; that the tray does not reflow while a word is being chosen; that I'm
  * stuck can be used once and costs 20; that shuffling the tray cannot lose
- * a tile or a half-typed word; and that dragging tiles to rearrange the tray
- * puts them where they were dropped, is remembered, and leaves a tap a tap.
+ * a tile or a half-typed word; that dragging tiles to rearrange the tray
+ * puts them where they were dropped, is remembered, and leaves a tap a tap;
+ * and (10 Oct 2026) that tiles go straight onto the board, any empty row can
+ * be aimed at, a take-back leaves a gap, and a finished grid scores exactly as
+ * it did when words could only stack from the top.
  */
 
 import { chromium } from "playwright";
@@ -103,7 +106,7 @@ console.log("\n2. Placing, taking back, and the score");
     const after = hx.currentScore().total;
     hx.takeBack(0);
     const back = hx.currentScore().total;
-    return { word, before, after, back, rows: S.rows.length, takebacks: S.takebacks };
+    return { word, before, after, back, rows: hx.filledCount(), takebacks: S.takebacks };
   });
 
   ok("a word was placed", !played.error && played.after > played.before, JSON.stringify(played));
@@ -154,7 +157,7 @@ console.log("\n3. A full game, the end card, and a reload");
     const sols = E.findSolutions(rack, list, 1);
     if (!sols.length) return { error: "no solution" };
     for (const word of sols[0]) {
-      const used = new Set(S.rows.flatMap((r) => r.ids));
+      const used = hx.placedIds();
       for (const ch of word) {
         const t = S.tiles.find((x) => x.ch === ch && !used.has(x.id) && !S.staged.includes(x.id));
         hx.stage(t.id);
@@ -163,7 +166,7 @@ console.log("\n3. A full game, the end card, and a reload");
     }
     hx.finish();
     return {
-      rows: S.rows.length, score: hx.currentScore().total, max: S.max,
+      rows: hx.filledCount(), score: hx.currentScore().total, max: S.max,
       ended: S.ended, share: hx.shareText(),
     };
   });
@@ -253,13 +256,15 @@ console.log("\n5. I'm stuck");
     const first = { staged: S.staged.length, helped: S.helped, penalty: hx.penalty() };
     hx.useStuck();                                 // a second go must do nothing
     const second = { helped: S.helped, penalty: hx.penalty() };
-    const gone = getComputedStyle(document.getElementById("extraBtns")).display === "none";
-    return { shown, label, first, second, gone };
+    return { shown, label, first, second };
   });
+  /* the button waits for GuffBot's shrug (650ms) before it goes */
+  await page.waitForTimeout(800);
+  r.gone = await page.evaluate(() => getComputedStyle(document.getElementById("extraBtns")).display === "none");
 
   ok("it appears once you start playing", r.shown);
   ok("it is labelled I'm stuck and shows the cost", /I'm stuck/.test(r.label) && /20/.test(r.label), r.label);
-  ok("it stages a whole word", r.first.staged === 4, JSON.stringify(r.first));
+  ok("it pencils a whole word onto the board", r.first.staged === 4, JSON.stringify(r.first));
   ok("it costs 20", r.first.penalty === 20, JSON.stringify(r.first));
   ok("a second use costs no more", r.second.penalty === 20, JSON.stringify(r.second));
   ok("the button goes away once used", r.gone);
@@ -273,7 +278,7 @@ console.log("\n5. I'm stuck");
     const rack = S.tiles.map((t) => t.ch).join("");
     const sol = E.findSolutions(rack, E.makeableWords(rack, hx.FOUR_LIST), 1)[0];
     for (const word of sol) {
-      const used = new Set(S.rows.flatMap((x) => x.ids));
+      const used = hx.placedIds();
       for (const ch of word) {
         const t = S.tiles.find((x) => x.ch === ch && !used.has(x.id) && !S.staged.includes(x.id));
         if (t) hx.stage(t.id);
@@ -282,7 +287,7 @@ console.log("\n5. I'm stuck");
     }
     hx.finish();
     return {
-      rows: S.rows.length, words: hx.currentScore().total,
+      rows: hx.filledCount(), words: hx.currentScore().total,
       bonus: hx.timeBonus(), penalty: hx.penalty(), final: hx.finalScore(),
       card: document.getElementById("cardBody").textContent.replace(/\s+/g, " "),
     };
@@ -331,7 +336,7 @@ console.log("\n6. Streak, keyboard, labels and premium pips");
   });
   for (const ch of typed.word) await page.keyboard.press(ch.toUpperCase());
   let st = await page.evaluate(() => window.__hx.S.staged.map((i) => window.__hx.S.tiles[i].ch).join(""));
-  ok("typing the letters stages the word", st === typed.word, `${st} vs ${typed.word}`);
+  ok("typing the letters pencils the word onto the board", st === typed.word, `${st} vs ${typed.word}`);
 
   await page.keyboard.press("Backspace");
   st = await page.evaluate(() => window.__hx.S.staged.length);
@@ -344,7 +349,7 @@ console.log("\n6. Streak, keyboard, labels and premium pips");
   for (const ch of typed.word) await page.keyboard.press(ch.toUpperCase());
   await page.keyboard.press("Enter");
   const afterEnter = await page.evaluate(() => ({
-    rows: window.__hx.S.rows.length,
+    rows: window.__hx.filledCount(),
     word: window.__hx.S.rows[0] && window.__hx.S.rows[0].word,
   }));
   ok("enter places it", afterEnter.rows === 1 && afterEnter.word === typed.word, JSON.stringify(afterEnter));
@@ -367,11 +372,12 @@ console.log("\n6. Streak, keyboard, labels and premium pips");
   const done = await page.evaluate(() => {
     const hx = window.__hx, { S, E } = hx;
     S.staged.length = 0;
-    S.rows.length = 0;
+    S.rows.fill(null);
+    S.target = 0;
     const rack = S.tiles.map((t) => t.ch).join("");
     const sol = E.findSolutions(rack, E.makeableWords(rack, hx.FOUR_LIST), 1)[0];
     for (const w of sol) {
-      const used = new Set(S.rows.flatMap((x) => x.ids));
+      const used = hx.placedIds();
       for (const ch of w) {
         const t = S.tiles.find((x) => x.ch === ch && !used.has(x.id) && !S.staged.includes(x.id));
         if (t) hx.stage(t.id);
@@ -444,10 +450,10 @@ for (const width of [320, 375, 390]) {
   /* The reason the tray does not close its gaps mid-word applies here too. */
   await page.click("#tray .tile:not(.ghost)");
   await page.click("#tray .tile:not(.ghost)");
-  const staged = await page.$$eval("#slots .tile .ch", (n) => n.map((x) => x.textContent));
+  const staged = await page.$$eval("#board .tile.pencil .ch", (n) => n.map((x) => x.textContent));
   await page.click("#btnMix");
   await page.waitForTimeout(800);
-  const still = await page.$$eval("#slots .tile .ch", (n) => n.map((x) => x.textContent));
+  const still = await page.$$eval("#board .tile.pencil .ch", (n) => n.map((x) => x.textContent));
   ok(`${width}: a half-typed word survives a shuffle`,
     staged.length === 2 && staged.join() === still.join(), `${staged} -> ${still}`);
   ok(`${width}: and the staged tiles keep their seats`,
@@ -502,7 +508,7 @@ for (const width of [320, 375, 390]) {
   const one = await ids(page);
   ok(`${width}: along a row, the tile lands where it was dropped`, one.join() === moved(start, 0, 5).join(),
     `${start} -> ${one}`);
-  ok(`${width}: and nothing was staged by the drag`, (await page.$$("#slots .tile")).length === 0);
+  ok(`${width}: and nothing was staged by the drag`, (await page.$$("#board .tile.pencil")).length === 0);
   ok(`${width}: the clock started`, await page.evaluate(() => window.__hx.S.running));
   ok(`${width}: no hollow or floating tile left behind`,
     (await page.$$("#tray .tile.hole, .tile.floating")).length === 0);
@@ -521,15 +527,15 @@ for (const width of [320, 375, 390]) {
   await page.mouse.move(t.x + t.width / 2 + 3, t.y + t.height / 2 + 2);
   await page.mouse.up();
   await page.waitForTimeout(100);
-  ok(`${width}: a press that barely moves still picks the tile`, (await page.$$("#slots .tile")).length === 1);
+  ok(`${width}: a press that barely moves still picks the tile`, (await page.$$("#board .tile.pencil")).length === 1);
 
   /* Mid-word: the word survives and its seats travel with the order. */
   await page.click("#tray .tile:not(.ghost)");
-  const word = await page.$$eval("#slots .tile .ch", (n) => n.map((x) => x.textContent).join(""));
+  const word = await page.$$eval("#board .tile.pencil .ch", (n) => n.map((x) => x.textContent).join(""));
   const live = await page.$$eval("#tray .tile", (ns) => ns.map((n, i) => n.classList.contains("ghost") ? -1 : i).filter((i) => i >= 0));
   await dragTile(page, live[0], live[live.length - 1]);
   ok(`${width}: a half-built word survives a rearrange`,
-    word.length === 2 && word === await page.$$eval("#slots .tile .ch", (n) => n.map((x) => x.textContent).join("")));
+    word.length === 2 && word === await page.$$eval("#board .tile.pencil .ch", (n) => n.map((x) => x.textContent).join("")));
   ok(`${width}: and its tiles keep their holes`, (await page.$$("#tray .tile.ghost")).length === 2);
   await page.keyboard.press("Escape");
 
@@ -565,7 +571,7 @@ for (const width of [320, 375, 390]) {
     window.dispatchEvent(ev("pointerup", 20));
     await new Promise((res) => setTimeout(res, 400));
     out.clean = !document.querySelector(".tile.floating, #tray .tile.hole");
-    out.staged = document.querySelectorAll("#slots .tile").length;
+    out.staged = document.querySelectorAll("#board .tile.pencil").length;
     return out;
   });
   ok("touch: the tile lifts off the tray", r.floating && r.hole);
@@ -585,6 +591,151 @@ for (const width of [320, 375, 390]) {
   ok("reduced motion: it still rearranges", (await ids(page)).join() === moved(start, 0, 3).join());
   ok("reduced motion: with nothing animating", (await page.evaluate(() => document.getAnimations().length)) === 0);
   ok("reduced motion: no page errors", errors.length === 0, errors.join(" | "));
+  await page.close();
+}
+
+console.log("\n9. Straight onto the board, any row");
+/* The staging slots went on 10 Oct 2026. Tapped tiles are pencilled straight
+   into the target row, which is the highest empty one unless another is
+   tapped; a take-back leaves a gap and nothing else moves; and scoring reads
+   columns from the top, which is what keeps every finished grid scoring what
+   it always did. That last point matters most: the maximum on the end card
+   comes from days.js, which was built under the old rule. */
+{
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(BASE, { waitUntil: "networkidle" });
+  await page.waitForSelector("#tray .tile");
+  ok("there are no staging slots any more", (await page.$$("#slots, .slot")).length === 0);
+  ok("the top row is the target to start with", (await page.evaluate(() => window.__hx.S.target)) === 0);
+
+  const sol = await page.evaluate(() => {
+    const hx = window.__hx, { S, E } = hx;
+    const rack = S.tiles.map((t) => t.ch).join("");
+    return E.findSolutions(rack, E.makeableWords(rack, hx.FOUR_LIST), 1)[0];
+  });
+  const tapLetter = async (ch) => {
+    const id = await page.evaluate((c) => {
+      const hx = window.__hx, { S } = hx;
+      const used = hx.placedIds();
+      const t = S.order.map((i) => S.tiles[i]).find((x) => x.ch === c && !used.has(x.id) && !S.staged.includes(x.id));
+      return t.id;
+    }, ch);
+    await page.click(`#tray .tile[data-id="${id}"]`);
+  };
+  const cell = (r, c) => `#board .cell[data-r="${r}"][data-c="${c}"]`;
+
+  await tapLetter(sol[0][0]);
+  ok("a tapped tile lands on the target row, pencilled",
+    (await page.$$(`${cell(0, 0)} .tile.pencil`)).length === 1);
+  ok("and leaves a hole in the tray", (await page.$$("#tray .tile.ghost")).length === 1);
+
+  await page.click(cell(2, 1));
+  let st = await page.evaluate(() => window.__hx.state());
+  ok("tapping an empty row aims there", st.target === 2, JSON.stringify(st));
+  ok("and the pencilled letter moves with it",
+    (await page.$$(`${cell(2, 0)} .tile.pencil`)).length === 1 && (await page.$$(`${cell(0, 0)} .tile`)).length === 0);
+
+  await page.click(cell(2, 0));
+  ok("tapping a pencilled letter puts it back in the tray",
+    (await page.$$("#board .tile.pencil")).length === 0 && (await page.$$("#tray .tile.ghost")).length === 0);
+
+  for (const ch of sol[0]) await tapLetter(ch);
+  const note = await page.textContent("#vnote");
+  ok("four letters show the score to come", /\+\d+/.test(note), note);
+  await page.click("#btnPlay");
+  await page.waitForTimeout(150);
+  st = await page.evaluate(() => window.__hx.state());
+  ok("Place inks the word into the row that was aimed at", st.grid[2] === sol[0] && st.grid[0] === null, JSON.stringify(st.grid));
+  ok("and the target goes back to the highest empty row", st.target === 0, String(st.target));
+
+  const lone = await page.evaluate((w) => {
+    const hx = window.__hx, { S, E, isWord } = hx;
+    return { score: hx.currentScore().total, across: E.scorePlacement([w], [S.layout[2]], isWord).total };
+  }, sol[0]);
+  ok("a word below a gap scores its own row and no columns", lone.score === lone.across, JSON.stringify(lone));
+
+  await page.keyboard.press("ArrowDown");
+  st = await page.evaluate(() => window.__hx.state());
+  ok("the down arrow moves to the next empty row", st.target === 1, String(st.target));
+  await page.keyboard.press("ArrowDown");
+  st = await page.evaluate(() => window.__hx.state());
+  ok("and skips a filled one", st.target === 3, String(st.target));
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowUp");
+  st = await page.evaluate(() => window.__hx.state());
+  ok("up goes back to the top", st.target === 0, String(st.target));
+
+  /* rows 3 then 0, by typing */
+  for (const [w, r] of [[sol[1], 3], [sol[2], 0]]) {
+    await page.evaluate((rr) => window.__hx.setTarget(rr), r);
+    for (const ch of w) await page.keyboard.press(ch.toUpperCase());
+    await page.keyboard.press("Enter");
+  }
+  const gapped = await page.evaluate(() => {
+    const hx = window.__hx;
+    const before = hx.state().grid.slice();
+    hx.takeBack(3);
+    return { before, after: hx.state().grid, target: hx.S.target };
+  });
+  ok("a take-back leaves its row empty", gapped.after[3] === null, JSON.stringify(gapped));
+  ok("and nothing else moves", [0, 1, 2].every((i) => gapped.after[i] === gapped.before[i]), JSON.stringify(gapped));
+  ok("and that row becomes the target", gapped.target === 3, String(gapped.target));
+
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector("#tray .tile");
+  st = await page.evaluate(() => window.__hx.state());
+  ok("a grid with gaps survives a reload, gaps and all",
+    st.grid[3] === null && st.grid[1] === null && st.grid[2] === sol[0] && st.grid[0] === sol[2] && st.target === 1,
+    JSON.stringify(st));
+
+  /* finish: row 3 first, the gap at row 1 last, so columns arrive late */
+  await page.evaluate(([a, b]) => {
+    const hx = window.__hx, { S } = hx;
+    const put = (w, r) => {
+      hx.setTarget(r);
+      const used = hx.placedIds();
+      for (const ch of w) { const t = S.tiles.find((x) => x.ch === ch && !used.has(x.id) && !S.staged.includes(x.id)); hx.stage(t.id); }
+      hx.placeWord();
+    };
+    put(b, 3); put(a, 1);
+  }, [sol[3], sol[1]]);
+  await page.waitForTimeout(1400);
+  const fin = await page.evaluate(() => {
+    const hx = window.__hx, { S, E, isWord } = hx;
+    return { st: hx.state(), old: E.scorePlacement(S.rows.map((r) => r.word), S.layout, isWord).total };
+  });
+  ok("filled in any order, the grid finishes", fin.st.ended && fin.st.rows.length === 4, JSON.stringify(fin.st));
+  ok("and scores exactly what the old top-down rule gives that grid", fin.st.score === fin.old, `${fin.st.score} vs ${fin.old}`);
+  ok("which is never more than the day's maximum", fin.st.score <= fin.st.max);
+  ok("the end card is showing", await page.isVisible("#card"));
+  ok("no page errors", errors.length === 0, errors.join(" | "));
+  await page.close();
+}
+{
+  /* A save from before 10 Oct 2026 (v1: a list of words from the top) loads.
+     Planted before the page starts, because a reload saves on the way out. */
+  const probe = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await probe.goto(BASE, { waitUntil: "networkidle" });
+  const seed = await probe.evaluate(() => {
+    const hx = window.__hx, { S, E } = hx;
+    const rack = S.tiles.map((t) => t.ch).join("");
+    const w = E.findSolutions(rack, E.makeableWords(rack, hx.FOUR_LIST), 1)[0][0];
+    const used = new Set(), out = [];
+    for (const ch of w) { const t = S.tiles.find((x) => x.ch === ch && !used.has(x.id)); used.add(t.id); out.push(t.id); }
+    return { key: "hexadec-" + S.date, val: JSON.stringify({ v: 1, rows: [out], ms: 1000, helped: false, ended: false, takebacks: 0 }) };
+  });
+  await probe.close();
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.addInitScript((sd) => localStorage.setItem(sd.key, sd.val), seed);
+  await page.goto(BASE, { waitUntil: "networkidle" });
+  await page.waitForSelector("#tray .tile");
+  const st = await page.evaluate(() => window.__hx.state());
+  ok("an old save loads into the top row", !!st.grid[0] && st.grid[1] === null && st.target === 1, JSON.stringify(st));
+  ok("old save: no page errors", errors.length === 0, errors.join(" | "));
   await page.close();
 }
 

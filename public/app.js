@@ -10,9 +10,15 @@
  *    words on the grid every time that list changes. That is what makes
  *    "take any word back at any time" safe — there is no way to bank points
  *    from a word and then remove it.
- * 2. Taking a word back closes the gap: the words below it move up a row, onto
- *    different premium squares, and everything rescores. That is honest rather
- *    than tidy, and it is visible, because the tiles physically move.
+ * 2. The grid is four fixed rows, any of which may be empty (10 Oct 2026). Tiles
+ *    you tap go straight onto the target row, pencilled in, and Place inks
+ *    them. The target is the highest empty row unless you tap another. Taking a
+ *    word back leaves a gap; nothing else moves. Columns read from the top, so a
+ *    column only scores once every row above it is filled. That makes a FINISHED
+ *    grid score exactly what it always did, so days.js, the maximums and par
+ *    were untouched by the change. Before this, words were an ordered list,
+ *    always landed on the next row down, and a take-back shunted the rows below
+ *    up onto different premium squares.
  */
 
 import * as E from "./engine.js";
@@ -77,8 +83,9 @@ const S = {
   layout: null,
   max: 0,
   par: 0,
-  staged: [],       // tile ids
-  rows: [],         // {word, ids:[4]}
+  staged: [],       // tile ids pencilled into the target row, left to right
+  rows: [null, null, null, null],   // per board row: {word, ids:[4]} or null
+  target: 0,        // the row tapped tiles go to; null once the grid is full
   ms: 0,            // milliseconds spent
   running: false,
   t0: 0,
@@ -86,6 +93,7 @@ const S = {
   ended: false,
   takebacks: 0,
   sent: false,
+  watch: null,      // the initials being watched, in watch mode (6 Oct 2026)
 };
 
 function loadDay() {
@@ -152,17 +160,18 @@ function dressCloth(index) {
 /* ---------------------------------------------------------------------------
  * Sizing
  *
- * The board, the staging row, the tray and the Place button all have to be on
+ * The board, the verdict line, the tray and the Place button all have to be on
  * screen together on a 375x600 phone, or the game asks the player to scroll at
- * the exact moment they are deciding something.
+ * the exact moment they are deciding something. The board got the room the
+ * staging slots used to take (10 Oct 2026).
  * ------------------------------------------------------------------------- */
 function fit() {
   const w = Math.min(document.documentElement.clientWidth, 520) - 24;
   const h = window.innerHeight;
   const byWidth = (w - 12 - 18) / 4;
-  /* board + stage + tray + buttons + header + footer, as multiples of a cell */
-  const chrome = 250;
-  const byHeight = (h - chrome) / 6.1;
+  /* board + tray + buttons as multiples of a cell; header, footer, verdict line */
+  const chrome = 272;
+  const byHeight = (h - chrome) / 5.2;
   const cell = Math.max(40, Math.min(78, Math.floor(Math.min(byWidth, byHeight))));
   document.documentElement.style.setProperty("--cell", cell + "px");
 }
@@ -174,8 +183,8 @@ const PREM = { d: ["dl", "2×L"], t: ["tl", "3×L"], D: ["dw", "2×W"], T: ["tw"
 
 /* A tray tile is a button, because pressing it is the whole game and a div with
    a click handler cannot be reached from a keyboard or announced by a screen
-   reader. Tiles on the board and in the staging slots stay plain, because there
-   the CELL is the control. */
+   reader. Tiles on the board stay plain, because there the CELL is the
+   control. */
 function tileNode(t, cls, tag) {
   const n = el(tag || "div", "tile" + (cls ? " " + cls : ""));
   if (tag === "button") {
@@ -189,6 +198,14 @@ function tileNode(t, cls, tag) {
 }
 const tileById = (id) => S.tiles.find((t) => t.id === id);
 
+/* The four rows are fixed seats now, so "how many words" and "which tiles are
+   down" are questions about the filled ones. */
+const filledRows = () => S.rows.filter(Boolean);
+const filledCount = () => filledRows().length;
+const placedIds = () => new Set(filledRows().flatMap((r) => r.ids));
+const firstEmpty = () => { const i = S.rows.findIndex((r) => !r); return i < 0 ? null : i; };
+function emptyRows() { S.rows = [null, null, null, null]; }
+
 function buildBoard() {
   const board = $("board");
   board.innerHTML = "";
@@ -198,44 +215,83 @@ function buildBoard() {
       const p = PREM[code];
       const cell = el("div", "cell" + (p ? " " + p[0] : ""), p ? p[1] : "");
       cell.dataset.r = r; cell.dataset.c = c;
-      cell.addEventListener("click", () => takeBack(r));
+      cell.addEventListener("click", () => onCell(r, c));
       cell.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); takeBack(r); }
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onCell(r, c); }
       });
       board.appendChild(cell);
     }
   }
 }
 
+/* One tap on the board means one of three things, by what is under it:
+   a word (take it back), the row you are spelling into (give that letter
+   back), or any other empty row (aim there; pencilled letters come too). */
+function onCell(r, c) {
+  if (S.ended) return;
+  if (S.rows[r]) { takeBack(r); return; }
+  if (r !== S.target) { setTarget(r); return; }
+  if (c < S.staged.length) unstage(c);
+}
+
+function setTarget(r) {
+  if (S.ended || r == null || S.rows[r] || r === S.target) return;
+  S.target = r;
+  paintBoard(); preview();
+  const cells = $("board").children;
+  if (!CALM.matches) for (let c = 0; c < 4; c++) {
+    const n = cells[r * 4 + c];
+    n.classList.remove("aim"); void n.offsetWidth; n.classList.add("aim");
+  }
+}
+
+/* What is under the tile, as a small code in its corner. Once a letter covers
+   a triple the square is invisible, so this is how a grid gets read. */
+function pip(t, code) {
+  if (PREM[code]) {
+    t.appendChild(el("span",
+      "prem " + (code === "d" || code === "t" ? "p-letter" : "p-word"),
+      PREM[code][1]));
+  }
+  return t;
+}
+
 function paintBoard() {
   const cells = $("board").children;
   for (let r = 0; r < 4; r++) {
+    const live = !S.ended && r === S.target;
     for (let c = 0; c < 4; c++) {
       const cell = cells[r * 4 + c];
       const old = cell.querySelector(".tile");
       if (old) old.remove();
-      cell.classList.toggle("row-live", !S.ended && r === S.rows.length);
+      cell.classList.toggle("row-live", live);
+      cell.classList.toggle("row-open", !S.ended && !live && !S.rows[r]);
       const row = S.rows[r];
       const code = S.layout[r][c];
+      const sq = PREM[code] ? `, ${PREM[code][1]} square` : "";
       if (row) {
-        const t = tileNode(tileById(row.ids[c]), "placed");
-        /* What is under the tile. Once a letter covers a triple, the square is
-           invisible and a finished grid can only be totalled, not read. */
-        if (PREM[code]) {
-          t.appendChild(el("span",
-            "prem " + (code === "d" || code === "t" ? "p-letter" : "p-word"),
-            PREM[code][1]));
-        }
-        cell.appendChild(t);
+        cell.appendChild(pip(tileNode(tileById(row.ids[c]), "placed"), code));
         cell.setAttribute("role", "button");
         cell.setAttribute("tabindex", S.ended ? "-1" : "0");
         cell.setAttribute("aria-label",
-          `Row ${r + 1}: ${row.word.toUpperCase()}${PREM[code] ? `, ${PREM[code][1]} square` : ""}. Take it back.`);
-      } else {
+          `Row ${r + 1}: ${row.word.toUpperCase()}${sq}. Take it back.`);
+      } else if (live && S.staged[c] != null) {
+        const t = tileById(S.staged[c]);
+        cell.appendChild(pip(tileNode(t, "pencil"), code));
+        cell.setAttribute("role", "button");
+        cell.setAttribute("tabindex", "0");
+        cell.setAttribute("aria-label", `Row ${r + 1}, letter ${c + 1}: ${t.ch.toUpperCase()}${sq}. Put it back.`);
+      } else if (S.ended) {
         cell.removeAttribute("role");
         cell.removeAttribute("tabindex");
-        cell.setAttribute("aria-label",
-          `Row ${r + 1}, square ${c + 1}${PREM[code] ? `, ${PREM[code][1]}` : ""}, empty`);
+        cell.setAttribute("aria-label", `Row ${r + 1}, square ${c + 1}${sq}, empty`);
+      } else {
+        /* One stop per empty row is plenty for a keyboard. */
+        cell.setAttribute("role", "button");
+        cell.setAttribute("tabindex", c === 0 && !live ? "0" : "-1");
+        cell.setAttribute("aria-label", live
+          ? `Row ${r + 1}, square ${c + 1}${sq}, empty. Your next word goes here.`
+          : `Row ${r + 1}, empty${sq}. Put your next word here.`);
       }
     }
   }
@@ -245,13 +301,13 @@ function paintBoard() {
  *
  * It used to, and that made it treacherous: every tap reflowed the row, so the
  * letter you were about to press moved out from under your thumb and you picked
- * the wrong one. A tile you have staged now leaves a hole exactly where it was,
- * and the holes close only when the word is placed — at which point the tiles
- * are gone for good and closing up is what you want. */
+ * the wrong one. A tile you have pencilled in leaves a hole exactly where it
+ * was, and the holes close only when the word is placed — at which point the
+ * tiles are gone for good and closing up is what you want. */
 function paintTray() {
   const tray = $("tray");
   tray.innerHTML = "";
-  const placed = new Set(S.rows.flatMap((r) => r.ids));
+  const placed = placedIds();
   const staged = new Set(S.staged);
   for (const id of S.order) {
     if (placed.has(id)) continue;
@@ -265,62 +321,67 @@ function paintTray() {
   }
 }
 
-function paintSlots() {
-  const slots = $("slots");
-  slots.innerHTML = "";
-  for (let i = 0; i < 4; i++) {
-    const s = el("div", "slot");
-    const id = S.staged[i];
-    if (id != null) {
-      s.appendChild(tileNode(tileById(id)));
-      s.addEventListener("click", () => unstage(i));
-      s.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); unstage(i); }
-      });
-      s.setAttribute("role", "button");
-      s.setAttribute("tabindex", "0");
-      s.setAttribute("aria-label", `${tileById(id).ch.toUpperCase()}, letter ${i + 1}. Put it back.`);
-    } else {
-      s.setAttribute("aria-label", `Letter ${i + 1}, empty`);
-    }
-    slots.appendChild(s);
+/* Score is a pure function of the grid. The unbroken run of rows from the top
+   scores exactly as it always has, columns and all. A word sitting below a gap
+   scores its own row only: a column reads from the top, so it has nothing to
+   read until the rows above it are filled. A full grid is therefore scored
+   identically to before rows could be left empty. */
+function scoreRows(rows) {
+  let k = 0;
+  while (k < 4 && rows[k]) k++;
+  const top = E.scorePlacement(rows.slice(0, k).map((r) => r.word), S.layout, isWord);
+  const out = [null, null, null, null];
+  top.rows.forEach((d, i) => { out[i] = d; });
+  let total = top.total;
+  for (let r = k + 1; r < 4; r++) {
+    if (!rows[r]) continue;
+    const across = E.scorePlacement([rows[r].word], [S.layout[r]], isWord).total;
+    out[r] = { word: rows[r].word, across, downs: [], total: across };
+    total += across;
   }
+  return { total, rows: out };
 }
-
-function currentScore() {
-  return E.scorePlacement(S.rows.map((r) => r.word), S.layout, isWord);
-}
+function currentScore() { return scoreRows(S.rows); }
 
 function paintScore() {
   $("score").textContent = currentScore().total.toLocaleString();
 }
 
-/* What would the staged word be worth, placed on the next free row? */
+/* What would the pencilled word be worth, inked into the target row? */
 function preview() {
   const word = S.staged.map((id) => tileById(id).ch).join("");
-  const vw = $("vword"), vn = $("vnote");
-  vw.textContent = word.toUpperCase() || " ";
+  const vn = $("vnote");
   $("btnPlay").disabled = true;
+  if (S.ended) { vn.className = ""; vn.textContent = " "; return; }
 
   if (S.staged.length < 4) {
     vn.className = "";
     vn.textContent = S.staged.length === 0
-      ? "Tap four tiles."
+      ? (filledCount() === 0 ? "Tap four tiles. Tap a row to aim elsewhere." : "Tap four tiles.")
       : `${4 - S.staged.length} more.`;
     return;
   }
   if (!FOUR_SET.has(word)) {
     vn.className = "bad";
-    vn.textContent = "Not in the word list.";
+    vn.textContent = `${word.toUpperCase()} is not in the word list.`;
     return;
   }
-  const before = currentScore().total;
-  const after = E.scorePlacement([...S.rows.map((r) => r.word), word], S.layout, isWord);
-  const gain = after.total - before;
-  const downs = after.rows[S.rows.length].downs;
+  const r = S.target;
+  const before = currentScore();
+  const rows = S.rows.slice();
+  rows[r] = { word, ids: S.staged.slice() };
+  const after = scoreRows(rows);
+  const gain = after.total - before.total;
+  /* Every column that comes good, including ones below this row that were
+     waiting on it to fill a gap. */
+  let downs = 0;
+  for (let i = r; i < 4; i++) {
+    const was = new Set(((before.rows[i] || {}).downs || []).map((d) => d.col));
+    for (const d of ((after.rows[i] || {}).downs || [])) if (!was.has(d.col)) downs++;
+  }
   vn.className = "";
-  vn.innerHTML = `<span class="pts">+${gain}</span>` +
-    (downs.length ? ` · ${downs.length} column${downs.length > 1 ? "s" : ""} down` : "");
+  vn.innerHTML = `${word.toUpperCase()} <span class="pts">+${gain}</span>` +
+    (downs ? ` · ${downs} column${downs > 1 ? "s" : ""} down` : "");
   $("btnPlay").disabled = false;
 }
 
@@ -331,7 +392,7 @@ function paintExtras() {
     (!S.ended && (!S.helped || stuckLeaving) && (S.running || S.ms > 0)) ? "flex" : "none";
   /* Once the sixteen are down the play controls make no sense, and the end
      card can be closed. The page must still have a way back to the score. */
-  $("stage").style.display = S.ended ? "none" : "";
+  $("verdict").style.display = S.ended ? "none" : "";
   $("tray").style.display = S.ended ? "none" : "";
   $("playBtns").style.display = S.ended ? "none" : "";
   $("doneBtns").style.display = S.ended ? "flex" : "none";
@@ -348,7 +409,7 @@ function stuckShrug() {
 }
 
 function repaint() {
-  paintBoard(); paintTray(); paintSlots(); paintScore(); preview(); paintExtras();
+  paintBoard(); paintTray(); paintScore(); preview(); paintExtras();
 }
 
 /* ---------------------------------------------------------------------------
@@ -376,25 +437,30 @@ function finalScore() {
   return Math.max(0, currentScore().total + timeBonus() - penalty());
 }
 
+/* A tapped tile goes straight onto the board, pencilled into the target row. */
 function stage(id) {
-  if (S.ended) return;
+  if (S.ended || S.target == null) return;
   startClock();
   if (S.staged.includes(id)) return;
-  if (S.rows.some((r) => r.ids.includes(id))) return;
+  if (placedIds().has(id)) return;
   if (S.staged.length >= 4) return;
   S.staged.push(id);
-  paintTray(); paintSlots(); preview(); paintExtras();
+  paintTray(); paintBoard(); preview(); paintExtras();
+  if (!CALM.matches) {
+    const t = $("board").children[S.target * 4 + S.staged.length - 1].querySelector(".tile");
+    if (t) t.classList.add("pop");
+  }
 }
 
 function unstage(i) {
   if (S.ended) return;
   S.staged.splice(i, 1);
-  paintTray(); paintSlots(); preview();
+  paintTray(); paintBoard(); preview();
 }
 
 function clearStage() {
   S.staged = [];
-  paintTray(); paintSlots(); preview();
+  paintTray(); paintBoard(); preview();
 }
 
 /* Shuffling the tray, with a bit of theatre.
@@ -641,24 +707,36 @@ function dropTile() {
 }
 
 function placeWord() {
-  if (S.staged.length !== 4 || S.ended) return;
+  if (S.staged.length !== 4 || S.ended || S.target == null) return;
   const word = S.staged.map((id) => tileById(id).ch).join("");
-  if (!FOUR_SET.has(word)) { $("slots").classList.add("shake"); setTimeout(() => $("slots").classList.remove("shake"), 360); return; }
-  const r = S.rows.length;
-  S.rows.push({ word, ids: S.staged.slice() });
+  const r = S.target;
+  if (!FOUR_SET.has(word)) {
+    const cells = $("board").children;
+    for (let c = 0; c < 4; c++) {
+      const n = cells[r * 4 + c];
+      n.classList.add("shake"); setTimeout(() => n.classList.remove("shake"), 360);
+    }
+    return;
+  }
+  const before = currentScore();
+  S.rows[r] = { word, ids: S.staged.slice() };
   S.staged = [];
+  S.target = firstEmpty();
   repaint();
-  celebrate(r);
+  celebrate(r, before);
   save();
-  if (S.rows.length === 4) setTimeout(finish, 1100);
+  if (filledCount() === 4) setTimeout(finish, 1100);
 }
 
+/* The word's tiles go back to the hand and its row is left empty and becomes
+   the target, so you can retype into the same seat. Nothing else moves. */
 function takeBack(r) {
   if (S.ended || !S.rows[r]) return;
   startClock();
-  S.rows.splice(r, 1);
+  S.rows[r] = null;
   S.takebacks++;
   S.staged = [];
+  S.target = r;
   repaint();
   save();
 }
@@ -682,26 +760,36 @@ function chipAt(cell, text, cls, delay) {
   setTimeout(() => chip.remove(), 1400 + delay);
 }
 
-function celebrate(r) {
+/* Filling a gap can bring columns good further down as well, so every row from
+   this one to the bottom is checked against how it stood before. */
+function celebrate(r, before) {
   const cells = $("board").children;
-  const detail = currentScore().rows[r];
+  const after = currentScore();
+  const detail = after.rows[r];
   if (!detail) return;
-  for (let c = 0; c < 4; c++) cells[r * 4 + c].querySelector(".tile")?.classList.add("drop");
+  for (let c = 0; c < 4; c++) cells[r * 4 + c].querySelector(".tile")?.classList.add("ink");
   $("board").style.position = "relative";
   chipAt(cells[r * 4 + 3], `+${detail.across}`, "across", 120);
 
-  detail.downs.forEach((d, k) => {
-    const delay = 460 + k * 260;
-    for (let i = 0; i <= r; i++) {
-      const cell = cells[i * 4 + d.col];
-      setTimeout(() => {
-        cell.classList.add("downlit");
-        setTimeout(() => cell.classList.remove("downlit"), 900);
-      }, delay);
+  let k = 0;
+  for (let rr = r; rr < 4; rr++) {
+    const row = after.rows[rr];
+    if (!row) continue;
+    const was = new Set((((before && before.rows[rr]) || {}).downs || []).map((d) => d.col));
+    for (const d of row.downs) {
+      if (rr !== r && was.has(d.col)) continue;
+      const delay = 460 + (k++) * 260;
+      for (let i = 0; i <= rr; i++) {
+        const cell = cells[i * 4 + d.col];
+        setTimeout(() => {
+          cell.classList.add("downlit");
+          setTimeout(() => cell.classList.remove("downlit"), 900);
+        }, delay);
+      }
+      const label = d.word.length === 4 ? `↓ ${d.word.toUpperCase()} +${d.score} ×2` : `↓ +${d.score}`;
+      chipAt(cells[rr * 4 + d.col], label, "down", delay);
     }
-    const label = d.word.length === 4 ? `↓ ${d.word.toUpperCase()} +${d.score} ×2` : `↓ +${d.score}`;
-    chipAt(cells[r * 4 + d.col], label, "down", delay);
-  });
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -713,7 +801,7 @@ function celebrate(r) {
  * be finished. Using it forfeits the time bonus, which is the whole cost.
  * ------------------------------------------------------------------------- */
 function remainingCounts() {
-  const used = new Set(S.rows.flatMap((r) => r.ids));
+  const used = placedIds();
   const left = S.tiles.filter((t) => !used.has(t.id)).map((t) => t.ch).join("");
   return { left, counts: E.countLetters(left) };
 }
@@ -748,22 +836,24 @@ function useStuck() {
   while (true) {
     const { left, counts } = remainingCounts();
     const list = E.makeableWords(left, FOUR_LIST);
-    const need = 4 - S.rows.length;
+    const need = 4 - filledCount();
     pick = list.find((w) => completable(minus(counts, w), list, need - 1));
-    if (pick || !S.rows.length) break;
-    S.rows.pop();
+    if (pick || !filledCount()) break;
+    /* the lowest word on the grid goes first */
+    for (let r = 3; r >= 0; r--) if (S.rows[r]) { S.rows[r] = null; break; }
     S.takebacks++;
     removed++;
   }
   S.helped = true;
   S.staged = [];
+  if (S.target == null || S.rows[S.target]) S.target = firstEmpty();
   if (!pick) {   /* cannot happen with a generated day; say something true anyway */
     repaint();
     $("vnote").className = "bad";
     $("vnote").textContent = "Nothing fits these tiles.";
     return;
   }
-  const used = new Set(S.rows.flatMap((r) => r.ids));
+  const used = placedIds();
   for (const ch of pick) {
     const t = S.tiles.find((x) => x.ch === ch && !used.has(x.id) && !S.staged.includes(x.id));
     if (t) S.staged.push(t.id);
@@ -823,7 +913,7 @@ const KEY = () => "hexadec-" + S.date;
 function save() {
   try {
     localStorage.setItem(KEY(), JSON.stringify({
-      v: 1, rows: S.rows.map((r) => r.ids), ms: elapsedMs(),
+      v: 2, rows: S.rows.map((r) => (r ? r.ids : null)), ms: elapsedMs(),
       helped: S.helped, ended: S.ended, takebacks: S.takebacks, order: S.order,
     }));
   } catch (e) {}
@@ -834,9 +924,14 @@ function restore() {
   if (!raw) return false;
   let d;
   try { d = JSON.parse(raw); } catch (e) { return false; }
-  if (!d || d.v !== 1 || !Array.isArray(d.rows)) return false;
+  /* v1 (before 10 Oct 2026) kept the words as a list from the top, with no
+     gaps; v2 keeps all four rows, null where a row is empty. */
+  if (!d || (d.v !== 1 && d.v !== 2) || !Array.isArray(d.rows) || d.rows.length > 4) return false;
   const seen = new Set();
-  for (const ids of d.rows) {
+  const rows = [null, null, null, null];
+  for (let r = 0; r < d.rows.length; r++) {
+    const ids = d.rows[r];
+    if (ids == null && d.v === 2) continue;
     if (!Array.isArray(ids) || ids.length !== 4) return false;
     for (const id of ids) {
       if (typeof id !== "number" || id < 0 || id > 15 || seen.has(id)) return false;
@@ -844,13 +939,15 @@ function restore() {
     }
     const word = ids.map((i) => S.tiles[i].ch).join("");
     if (!FOUR_SET.has(word)) return false;
-    S.rows.push({ word, ids });
+    rows[r] = { word, ids };
   }
+  S.rows = rows;
+  S.target = firstEmpty();
   if (Array.isArray(d.order) && d.order.length === 16) S.order = d.order;
   S.ms = typeof d.ms === "number" && d.ms >= 0 ? d.ms : 0;
   S.helped = !!d.helped;
   S.takebacks = d.takebacks | 0;
-  S.ended = !!d.ended || S.rows.length === 4;
+  S.ended = !!d.ended || filledCount() === 4;
   return true;
 }
 
@@ -858,6 +955,7 @@ function restore() {
  * Finishing
  * ------------------------------------------------------------------------- */
 function finish() {
+  if (S.watch) return;   // someone else's board: no card, no history, no report
   if (S.ended) { showCard(); return; }
   stopClock();
   S.ended = true;
@@ -872,7 +970,7 @@ function shareArt() {
      marked when it was part of a column that went all the way down. */
   const detail = currentScore();
   const full = new Set();
-  detail.rows.forEach((row, r) => row.downs.forEach((d) => {
+  detail.rows.forEach((row, r) => row && row.downs.forEach((d) => {
     if (d.word.length === 4) for (let i = 0; i < 4; i++) full.add(i * 4 + d.col);
   }));
   const out = [];
@@ -882,7 +980,7 @@ function shareArt() {
       if (full.has(r * 4 + c)) { line += "\u{1F7EA}"; continue; }
       const code = S.layout[r][c];
       const lm = code === "d" ? 2 : code === "t" ? 3 : 1;
-      const v = E.letterValue(S.rows[r].word[c]) * lm;
+      const v = S.rows[r] ? E.letterValue(S.rows[r].word[c]) * lm : 0;
       line += v >= 8 ? "\u{1F7E7}" : v >= 4 ? "\u{1F7E8}" : "⬜";
     }
     out.push(line);
@@ -931,10 +1029,10 @@ function showCard() {
   const secs = Math.floor(elapsedMs() / 1000);
   const mm = Math.floor(secs / 60), ss = String(secs % 60).padStart(2, "0");
 
-  const downs = detail.rows.flatMap((r) => r.downs);
+  const downs = detail.rows.filter(Boolean).flatMap((r) => r.downs);
   const fulls = downs.filter((d) => d.word.length === 4);
 
-  const rowLines = detail.rows.map((r, i) =>
+  const rowLines = detail.rows.filter(Boolean).map((r, i) =>
     `<code>${r.word.toUpperCase()}</code> ${r.total}` +
     (r.downs.length ? ` <span class="muted">(${r.downs.map((d) => "↓" + d.word.toUpperCase() + " " + d.score).join(" ")})</span>` : "")
   ).join("<br>");
@@ -1088,7 +1186,7 @@ function report() {
     fetch("/api/played", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        date: S.date, complete: S.rows.length === 4 ? 1 : 0,
+        date: S.date, complete: filledCount() === 4 ? 1 : 0,
         score: finalScore(), words, seconds: Math.floor(elapsedMs() / 1000),
         pct: Math.round(words / S.max * 100), helped: S.helped ? 1 : 0,
       }),
@@ -1109,6 +1207,10 @@ function paintBar() {
       score: Math.min(9999, total), max: LEAGUE_MAX,
       perfect: words >= S.max,   // every point on the board: the bar throws a party (5 Oct 2026)
       display: `${total.toLocaleString()} · ${pct}%`,
+      // The finished grid goes with the score (6 Oct 2026): four rows of tile
+      // numbers. The day's tiles and layout come from the date, so this is all
+      // the league needs to draw the board again. Only when the grid is whole.
+      replay: filledCount() === 4 ? { v: 1, rows: S.rows.map((r) => r.ids) } : undefined,
     });
   } else if (!window.GuffBar) {
     slot.innerHTML = '<div class="trimnote">(The Guff bar and daily league appear here on the live site.)</div>';
@@ -1161,11 +1263,20 @@ function onKey(e) {
   if (/^[a-zA-Z]$/.test(k)) {
     if (S.staged.length >= 4) return;
     const ch = k.toLowerCase();
-    const placed = new Set(S.rows.flatMap((r) => r.ids));
+    const placed = placedIds();
     const id = S.order.find((i) =>
       !placed.has(i) && !S.staged.includes(i) && tileById(i).ch === ch);
     if (id == null) return;
     stage(id);
+    e.preventDefault();
+    return;
+  }
+  if (k === "ArrowUp" || k === "ArrowDown") {
+    /* move the target to the next empty row that way */
+    const step = k === "ArrowUp" ? -1 : 1;
+    for (let r = (S.target == null ? 0 : S.target) + step; r >= 0 && r < 4; r += step) {
+      if (!S.rows[r]) { setTarget(r); break; }
+    }
     e.preventDefault();
     return;
   }
@@ -1198,14 +1309,17 @@ function homeScreenCard() {
   $("btnOk").addEventListener("click", () => $("overlay").classList.remove("on"));
 }
 
-/* A one-off NEW card for the rack rearranging (28 Sept 2026). Carl's call:
-   each returning player sees it once, on their next visit, whenever that is.
-   Never on a day already finished. Someone who has never played before gets
-   no card (to them nothing is new, and there is no first-visit rules panel
-   either); they are simply marked as told so it cannot surprise them later.
-   Skipped under automation (navigator.webdriver) so npm run ui is not left
-   clicking at a card that covers the tray. */
-const NEWS_KEY = "hexadec-news-rearrange";
+/* One-off NEW cards, each seen once by each returning player on their next
+   visit, whenever that is. Never on a day already finished. Someone who has
+   never played before gets no card (to them nothing is new, and there is no
+   first-visit rules panel either); they are simply marked as told so it cannot
+   surprise them later. Skipped under automation (navigator.webdriver) so
+   npm run ui is not left clicking at a card that covers the tray.
+
+   28 Sept 2026: rearranging the rack. 10 Oct 2026: tiles go straight onto the
+   board and any row can be aimed at, which replaces the rack card: anyone who
+   never saw that one learns about dragging from this one's last line. */
+const NEWS_KEY = "hexadec-news-board";
 function newsCard(returning) {
   if (S.ended || navigator.webdriver) return;
   try {
@@ -1216,12 +1330,16 @@ function newsCard(returning) {
   $("cardBody").innerHTML = `
     <div class="news">
       <span class="newtag">NEW</span>
-      <h1>Pre-planning</h1>
-      <p>You can arrange the tiles in your rack. Drag one and the others shuffle
-      aside to make room. A quick tap still picks a tile.</p>
-      <div class="newsdemo" aria-hidden="true">
-        <span class="tile nd1"><span class="ch">E</span></span><span class="tile nd2"><span class="ch">A</span></span><span class="tile nd3"><span class="ch">T</span></span><span class="tile nd4"><span class="ch">M</span></span>
+      <h1>Straight on the board</h1>
+      <p>Tap a tile and it goes straight onto the grid. Tap any empty row to put
+      your word there instead. Taking a word back no longer moves the others.</p>
+      <div class="nbdemo" aria-hidden="true">
+        <div class="nbrow nbr1"><i></i><i></i><i></i><i></i></div>
+        <div class="nbrow nbr2"><i></i><i></i><i></i><i></i></div>
+        <span class="tile nb1"><span class="ch">M</span></span><span class="tile nb2"><span class="ch">E</span></span><span class="tile nb3"><span class="ch">A</span></span><span class="tile nb4"><span class="ch">T</span></span>
+        <span class="nbtap"></span>
       </div>
+      <p class="muted">Columns read from the top, so they count once the rows above them are full.</p>
       <button class="btn primary" id="btnNews">Lovely, let me at it</button>
     </div>`;
   $("overlay").classList.add("on");
@@ -1243,9 +1361,10 @@ function boot() {
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k && k.startsWith("hexadec-") && k !== NEWS_KEY) { returning = true; break; }
+      if (k && k.startsWith("hexadec-") && !k.startsWith("hexadec-news-")) { returning = true; break; }
     }
   } catch (e) {}
+  if (/[?&]watch=/.test(location.search)) { startWatch(); return; }
   restore();
   $("dateline").textContent = new Date(S.date + "T12:00:00")
     .toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
@@ -1282,15 +1401,73 @@ function boot() {
   setInterval(() => { if (!S.ended) paintExtras(); }, 2000);
 
   if (S.ended) { finish(); }
-  else if (S.rows.length === 4) { finish(); }
+  else if (filledCount() === 4) { finish(); }
   else newsCard(returning);
+}
+
+/* ---------------------------------------------------------------------------
+ * Looking at someone else's finished board (6 Oct 2026)
+ *
+ * ?watch=<date>.<INI> from the league's all-time greats. Hexadec's replay is the
+ * final grid only (Carl: not much fun in watching the video of this one), so
+ * there is no playback: guff-watch.js (on the hub) fetches the board, applies
+ * the spoiler rule and runs the bar; this draws that day's grid with their four
+ * words on it, each row's points beneath. Nothing is saved or reported.
+ * ------------------------------------------------------------------------- */
+function loadWatch() {
+  return new Promise((res, rej) => {
+    if (window.GuffWatch) return res(window.GuffWatch);
+    const sc = document.createElement("script");
+    sc.src = "https://guff.carl-b82.workers.dev/guff-watch.js";
+    sc.onload = () => res(window.GuffWatch); sc.onerror = rej;
+    document.head.appendChild(sc);
+  });
+}
+function startWatch() {
+  document.body.classList.add("iswatch");
+  loadWatch().then((GW) => {
+    GW.run({
+      game: "hexadec", name: "Hexadec", still: true,
+      played: (date) => {
+        try { const d = JSON.parse(localStorage.getItem("hexadec-" + date)); return !!(d && (d.ended || (d.rows && d.rows.filter(Boolean).length === 4))); }
+        catch (e) { return false; }
+      },
+      begin(data) {
+        const ids = data.replay && Array.isArray(data.replay.rows) ? data.replay.rows : [];
+        S.date = data.date;
+        if (!loadDay()) throw new Error("no such day");
+        S.watch = data.initials; S.ended = true; emptyRows(); S.target = null;
+        ids.slice(0, 4).forEach((r, i) => { S.rows[i] = { ids: r, word: r.map((k) => S.tiles[k].ch).join("") }; });
+        dressCloth(S.idx); fit(); buildBoard(); S.staged = [];
+        $("dateline").textContent = new Date(data.date + "T12:00:00")
+          .toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+        repaint();
+        const detail = currentScore(), pct = Math.round(detail.total / S.max * 100);
+        let sum = $("watchSum");
+        if (!sum) { sum = el("div", ""); sum.id = "watchSum"; $("boardwrap").after(sum); }
+        sum.innerHTML = detail.rows.filter(Boolean).map((r) =>
+          `<code>${r.word.toUpperCase()}</code> ${r.total}` +
+          (r.downs.length ? ` <span class="muted">(${r.downs.map((d) => "↓" + d.word.toUpperCase() + " " + d.score).join(" ")})</span>` : "")
+        ).join("<br>") +
+          `<div class="muted" style="margin-top:6px">${detail.total} on the grid, ${pct}% of the best possible ${S.max}.</div>`;
+        GW.note("");
+        return 0;
+      },
+      finish() {},
+    });
+  }).catch(() => {
+    document.body.classList.remove("iswatch");
+    toast("The replay player didn't load. Try again in a moment.");
+  });
 }
 
 /* Test and tooling hook, in the family style. */
 window.__hx = {
-  S, E, isWord, FOUR_LIST, currentScore, placeWord, stage, takeBack, useStuck, dragging: () => !!drag,
+  S, E, isWord, FOUR_LIST, currentScore, placeWord, stage, unstage, takeBack, setTarget, useStuck,
+  dragging: () => !!drag, placedIds, filledCount,
   shareText, finish, timeBonus, penalty, finalScore, state: () => ({
-    rows: S.rows.map((r) => r.word), score: currentScore().total,
+    rows: filledRows().map((r) => r.word), grid: S.rows.map((r) => (r ? r.word : null)),
+    target: S.target, score: currentScore().total,
     max: S.max, ended: S.ended, helped: S.helped, takebacks: S.takebacks,
   }),
 };

@@ -1,14 +1,14 @@
 # Hexadec
 
 Sixteen lettered tiles. Hidden among them are four four-letter words that use
-every tile exactly once. Build one and it lands on the next row of a 4×4 grid,
-scored against premium squares. Columns that happen to read as words score too.
+every tile exactly once. Tap tiles and they go straight onto a row of a 4×4
+grid (the highest empty one, or any empty row you tap), scored against premium
+squares. Columns that happen to read as words score too.
 
 The catch, and the whole game: far more words can be made than can be *used*.
 Three good words will often leave you holding four letters that spell nothing —
 measured at about 85% of the time for a player choosing plausible words without
-thinking ahead. So you take one back, and the words below it move up onto
-different squares, and everything rescores.
+thinking ahead. So you take one back, leave a gap, and try something else.
 
 Finish inside five quiet minutes and you keep a point for every five seconds
 left, up to 60. There is no clock on screen.
@@ -62,18 +62,35 @@ earlier rows contribute face value. An invalid column never blocks a play; a
 grid whose rows and columns are all words is a double word square, which is
 vanishingly rare, and requiring one would make almost every day unwinnable.
 
-**The tray does not close its gaps while you are choosing.** A staged tile
+**The tray does not close its gaps while you are choosing.** A pencilled tile
 leaves a hole exactly where it was; the holes close only when the word is
 placed. This matters more than it sounds: when the tray reflowed on every tap,
 the letter you were reaching for moved out from under your thumb and you picked
 the wrong one. `npm run ui` section 4 asserts the last tile does not move while
 a word is being built.
 
-**Taking a word back** removes that row and closes the gap — the rows below
-move up. Score is not accumulated; it is recomputed from the ordered list of
-words every time that list changes, so there is no way to bank points from a
-word and then remove it. `npm run ui` asserts this by placing and removing the
-same word ten times.
+**Straight onto the board, any row (10 Oct 2026).** There used to be a row of
+four staging slots under the grid, and words always landed on the next row
+down. Now a tapped tile is pencilled straight into the target row (lifted,
+dashed edge, not yet counted) and **Place word** inks it. The target is the
+highest empty row unless the player taps another empty row, or uses the arrow
+keys; pencilled letters move with it. Tapping a pencilled letter gives it back.
+
+**Taking a word back** empties that row and makes it the target. Nothing else
+moves. (It used to close the gap, shunting the rows below up onto different
+premium squares, which was the most disorienting thing in the game.)
+
+**Columns read from the top.** The unbroken run of filled rows from the top
+scores exactly as it always did; a word below a gap scores its own row only,
+until the rows above it are filled and its columns can be read. So any FINISHED
+grid scores exactly what it scored under the old stack-from-the-top rule, and
+`days.js`, the maximums and par did not need regenerating. `npm run ui` section
+9 fills a grid out of order and checks the total against the old function.
+
+Score is not accumulated; it is recomputed from the grid every time it changes,
+so there is no way to bank points from a word and then remove it. `npm run ui`
+asserts this by placing and removing the same word ten times. Saves are v2 (all
+four rows, null for empty); v1 saves from before the change still load.
 
 **The clock** is five minutes, hidden, started on the first tap and paused when
 the tab is. What is left of it scores **one point per five seconds**, so the
@@ -244,7 +261,7 @@ Module scripts do not load from `file://`, so opening `public/index.html`
 directly will not work — use `npm run serve`.
 
 Test hook: `window.__hx` = {S, E, isWord, FOUR_LIST, currentScore, placeWord,
-stage, takeBack, showMeAWord, shareText, finish, timeBonus, state()}.
+stage, unstage, takeBack, setTarget, placedIds, filledCount, showMeAWord, shareText, finish, timeBonus, state()}.
 
 ---
 
