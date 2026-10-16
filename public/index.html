@@ -163,6 +163,15 @@ header{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
 #vnote{font-size:13px;color:var(--ink-soft);line-height:1.4}
 #vnote.bad{color:var(--bad)}
 #vnote .pts{color:var(--good);font-weight:700}
+#vnote .neg{color:var(--bad);font-weight:700}
+/* ---- the full grid: words slide up and down (16 Oct 2026) ------------- */
+#board.arrange{touch-action:none}
+#board.arrange .cell{cursor:grab}
+#board.arrange .tile.placed{transition:transform .2s ease}
+#board.arrange .tile.lift{transition:none;z-index:3;
+  box-shadow:0 6px 0 #d9c7a6,0 14px 18px rgba(70,45,20,.3)}
+#board.arrange .cell.colword{box-shadow:inset 0 0 0 3px rgba(15,110,99,.45)}
+body.iswatch #arrangeBtns{display:none !important}
 @media (prefers-reduced-motion:reduce){.tile.pop,.tile.ink,.cell.aim{animation:none!important}}
 
 /* ---- tray -------------------------------------------------------------- */
@@ -378,6 +387,10 @@ body.iswatch #board .cell{cursor:default}
 
     <div id="tray" aria-label="The tiles still in your hand"></div>
 
+    <div class="row-btns" id="arrangeBtns" style="display:none">
+      <button class="btn primary" id="btnFinish">Finish</button>
+    </div>
+
     <div class="row-btns" id="doneBtns" style="display:none">
       <button class="btn primary" id="btnResult">See your score</button>
     </div>
@@ -399,6 +412,7 @@ body.iswatch #board .cell{cursor:default}
         <li>Plenty of words can be made. Only some sets of four use up all sixteen tiles, so three good words can still leave you holding nonsense.</li>
         <li>The highest empty row is highlighted. Tap any other empty row to put your word there instead.</li>
         <li>Tap a word already on the grid to take it back. The others stay where they are.</li>
+        <li>With all sixteen down, drag a word up or down to try another order. The same words on different rows catch different squares and make different columns; the score follows. Tap <b>Finish</b> when you're happy.</li>
         <li>Columns that happen to read as a word score a bonus too, top to bottom. A full four-letter column scores double. Columns read from the top row, so they count once every row above them is filled.</li>
         <li>Finish inside five quiet minutes and you keep a point for every five seconds left, up to 60. There is no clock on screen.</li>
         <li>Properly stuck? <b>I'm stuck</b> finds you a word that still leaves a way home. Once per game, and it costs 20 points.</li>

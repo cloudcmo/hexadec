@@ -361,3 +361,14 @@ greyscale rather than relying on colour at all.
 - No archive of past days, deliberately: the daily stays scarce.
 - The clock starts on the first tap, so it is possible to study the tiles before
   starting. Self-limiting, and kind to a thoughtful player.
+
+## Arrange and finish (16 Oct 2026)
+
+The sixteenth tile no longer ends the game. With the grid full, any word can be
+dragged up or down (`moveRow` in app.js; a press that does not move still takes
+the word back); the score pill follows every move and four-letter columns light
+up where they stand. **Finish** ends the day. Nothing about scoring changed: the
+day's maximum was always the best of every solution in every row order, so the
+arrange step only lets the player go looking for it. The clock keeps running.
+Saves with four rows and `ended: false` resume in the arrange step. The NEW card
+key is `hexadec-news-arrange`.

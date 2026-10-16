@@ -702,11 +702,37 @@ console.log("\n9. Straight onto the board, any row");
     put(b, 3); put(a, 1);
   }, [sol[3], sol[1]]);
   await page.waitForTimeout(1400);
+  /* the sixteenth tile no longer ends the game (16 Oct 2026): the grid is full,
+     the words can be slid into another order, and Finish ends it */
+  const arr = await page.evaluate(() => {
+    const hx = window.__hx, { S, E, isWord } = hx;
+    const grid0 = S.rows.map((r) => r.word);
+    const s0 = hx.currentScore().total;
+    hx.moveRow(3, 0);
+    const grid1 = S.rows.map((r) => r.word);
+    const s1 = hx.currentScore().total;
+    const expect1 = E.scorePlacement(grid1, S.layout, isWord).total;
+    hx.moveRow(0, 3);
+    const grid2 = S.rows.map((r) => r.word);
+    return { arrange: hx.inArrange(), ended: S.ended, grid0, grid1, grid2, s0, s1, expect1,
+      finishShown: getComputedStyle(document.getElementById("arrangeBtns")).display !== "none",
+      pill: document.getElementById("score").textContent };
+  });
+  ok("a full grid waits in the arrange step instead of ending", arr.arrange && !arr.ended && arr.finishShown, JSON.stringify(arr));
+  ok("dragging the bottom word to the top reorders the rows", arr.grid1[0] === arr.grid0[3] && arr.grid1[1] === arr.grid0[0], JSON.stringify(arr.grid1));
+  ok("and the score is the pure score of the new grid", arr.s1 === arr.expect1, `${arr.s1} vs ${arr.expect1}`);
+  ok("moving it back restores the grid", JSON.stringify(arr.grid2) === JSON.stringify(arr.grid0), JSON.stringify(arr.grid2));
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(400);
+  const back = await page.evaluate(() => ({ arrange: window.__hx.inArrange(), ended: window.__hx.S.ended }));
+  ok("the arrange step survives a reload without ending the game", back.arrange && !back.ended, JSON.stringify(back));
+  await page.click("#btnFinish");
+  await page.waitForTimeout(300);
   const fin = await page.evaluate(() => {
     const hx = window.__hx, { S, E, isWord } = hx;
     return { st: hx.state(), old: E.scorePlacement(S.rows.map((r) => r.word), S.layout, isWord).total };
   });
-  ok("filled in any order, the grid finishes", fin.st.ended && fin.st.rows.length === 4, JSON.stringify(fin.st));
+  ok("filled in any order, Finish ends the grid", fin.st.ended && fin.st.rows.length === 4, JSON.stringify(fin.st));
   ok("and scores exactly what the old top-down rule gives that grid", fin.st.score === fin.old, `${fin.st.score} vs ${fin.old}`);
   ok("which is never more than the day's maximum", fin.st.score <= fin.st.max);
   ok("the end card is showing", await page.isVisible("#card"));

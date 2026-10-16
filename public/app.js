@@ -19,6 +19,12 @@
  *    were untouched by the change. Before this, words were an ordered list,
  *    always landed on the next row down, and a take-back shunted the rows below
  *    up onto different premium squares.
+ * 3. The sixteenth tile does not end the game (16 Oct 2026). Once the grid is
+ *    full the words can be dragged up and down to try other orders, since the
+ *    same four words on different rows catch different premium squares and
+ *    make different columns. Finish ends it. The day's maximum was always the
+ *    best of every solution in every row order, so nothing about the maximums
+ *    or par changed; this just lets the player go looking for it.
  */
 
 import * as E from "./engine.js";
@@ -353,6 +359,11 @@ function preview() {
   const vn = $("vnote");
   $("btnPlay").disabled = true;
   if (S.ended) { vn.className = ""; vn.textContent = " "; return; }
+  if (inArrange()) {
+    vn.className = "";
+    vn.textContent = "All sixteen down. Drag a word up or down to try another order, then Finish.";
+    return;
+  }
 
   if (S.staged.length < 4) {
     vn.className = "";
@@ -389,13 +400,16 @@ function preview() {
    the game is over. The 20 points are the regulator, not the timing. */
 function paintExtras() {
   $("extraBtns").style.display =
-    (!S.ended && (!S.helped || stuckLeaving) && (S.running || S.ms > 0)) ? "flex" : "none";
+    (!S.ended && !inArrange() && (!S.helped || stuckLeaving) && (S.running || S.ms > 0)) ? "flex" : "none";
   /* Once the sixteen are down the play controls make no sense, and the end
      card can be closed. The page must still have a way back to the score. */
+  const arr = inArrange();
   $("verdict").style.display = S.ended ? "none" : "";
-  $("tray").style.display = S.ended ? "none" : "";
-  $("playBtns").style.display = S.ended ? "none" : "";
+  $("tray").style.display = (S.ended || arr) ? "none" : "";
+  $("playBtns").style.display = (S.ended || arr) ? "none" : "";
+  $("arrangeBtns").style.display = arr ? "flex" : "none";
   $("doneBtns").style.display = S.ended ? "flex" : "none";
+  $("board").classList.toggle("arrange", arr);
 }
 /* GuffBot lives on the I'm stuck button. When it is pressed he shrugs, and the
    button waits for the shrug to finish before it goes. Not saved: it is a moment,
@@ -725,7 +739,102 @@ function placeWord() {
   repaint();
   celebrate(r, before);
   save();
-  if (filledCount() === 4) setTimeout(finish, 1100);
+  if (filledCount() === 4) setTimeout(enterArrange, 1100);
+}
+
+/* ---------------------------------------------------------------------------
+ * The full grid: slide the words into a better order (16 Oct 2026)
+ *
+ * With all sixteen down the play controls go and Finish takes their place. Any
+ * word can be dragged up or down; the others shuffle out of its way. The score
+ * pill follows every move, because score is a pure function of the grid, and
+ * columns that read as words light up where they stand. A tap on a word still
+ * takes it back, exactly as before.
+ * ------------------------------------------------------------------------- */
+const inArrange = () => !S.ended && !S.watch && filledCount() === 4;
+
+function enterArrange() {
+  if (!inArrange()) return;
+  S.target = null;
+  S.staged = [];
+  repaint();
+  litColumns();
+}
+
+/* Light the columns that read as words, top to bottom, where they stand. */
+function litColumns() {
+  const cells = $("board").children;
+  for (let i = 0; i < 16; i++) cells[i].classList.remove("colword");
+  if (filledCount() !== 4) return;
+  const sc = currentScore();
+  for (let r = 0; r < 4; r++) for (const d of ((sc.rows[r] || {}).downs || [])) {
+    if (d.word.length !== 4) continue;
+    for (let i = 0; i <= r; i++) cells[i * 4 + d.col].classList.add("colword");
+  }
+}
+
+function moveRow(from, to) {
+  if (!inArrange() || from === to || from < 0 || to < 0 || from > 3 || to > 3) return;
+  const before = currentScore();
+  const rows = S.rows.slice();
+  const [row] = rows.splice(from, 1);
+  rows.splice(to, 0, row);
+  S.rows = rows;
+  repaint();
+  litColumns();
+  const after = currentScore();
+  const gain = after.total - before.total;
+  const vn = $("vnote");
+  vn.className = "";
+  vn.innerHTML = gain === 0 ? `${after.total.toLocaleString()} points. Same as before.`
+    : `${after.total.toLocaleString()} points <span class="${gain > 0 ? "pts" : "neg"}">${gain > 0 ? "+" : ""}${gain}</span>`;
+  save();
+}
+
+let rowDrag = null;
+function onBoardDown(e) {
+  if (!inArrange() || e.button > 0) return;
+  const cell = e.target.closest(".cell");
+  if (!cell) return;
+  const r = +cell.dataset.r;
+  if (!S.rows[r]) return;
+  const cells = $("board").children;
+  const rowH = cells[4].getBoundingClientRect().top - cells[0].getBoundingClientRect().top;
+  rowDrag = { start: r, at: r, y: e.clientY, rowH, moved: false, id: e.pointerId };
+  try { $("board").setPointerCapture(e.pointerId); } catch (x) {}
+}
+function onBoardMove(e) {
+  if (!rowDrag || e.pointerId !== rowDrag.id) return;
+  const dy = e.clientY - rowDrag.y;
+  if (!rowDrag.moved && Math.abs(dy) < 8) return;
+  rowDrag.moved = true;
+  e.preventDefault();
+  const want = Math.max(0, Math.min(3, rowDrag.start + Math.round(dy / rowDrag.rowH)));
+  if (want !== rowDrag.at) { moveRow(rowDrag.at, want); rowDrag.at = want; }
+  const off = dy - (rowDrag.at - rowDrag.start) * rowDrag.rowH;
+  const cells = $("board").children;
+  for (let i = 0; i < 16; i++) {
+    const t = cells[i].querySelector(".tile");
+    if (!t) continue;
+    const mine = Math.floor(i / 4) === rowDrag.at;
+    t.classList.toggle("lift", mine);
+    t.style.transform = mine ? `translateY(${off}px) scale(1.04)` : "";
+  }
+}
+function onBoardUp(e) {
+  if (!rowDrag || e.pointerId !== rowDrag.id) return;
+  const d = rowDrag; rowDrag = null;
+  const cells = $("board").children;
+  for (let i = 0; i < 16; i++) {
+    const t = cells[i].querySelector(".tile");
+    if (t) { t.classList.remove("lift"); t.style.transform = ""; }
+  }
+  /* With the pointer captured, the click lands on the board rather than the
+     cell, so the tap is handled here: a press that did not move takes the word
+     back, exactly as before; a drag does not. */
+  swallowClickUntil = performance.now() + 400;
+  if (d.moved) litColumns();
+  else takeBack(d.start);
 }
 
 /* The word's tiles go back to the hand and its row is left empty and becomes
@@ -947,7 +1056,7 @@ function restore() {
   S.ms = typeof d.ms === "number" && d.ms >= 0 ? d.ms : 0;
   S.helped = !!d.helped;
   S.takebacks = d.takebacks | 0;
-  S.ended = !!d.ended || filledCount() === 4;
+  S.ended = !!d.ended;
   return true;
 }
 
@@ -1260,6 +1369,19 @@ function onKey(e) {
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
 
   const k = e.key;
+  if (inArrange()) {
+    /* a focused word moves with the arrows; enter finishes */
+    const cell = t && t.closest ? t.closest(".cell") : null;
+    const r = cell ? +cell.dataset.r : -1;
+    if ((k === "ArrowUp" || k === "ArrowDown") && r >= 0) {
+      const to = r + (k === "ArrowUp" ? -1 : 1);
+      moveRow(r, to);
+      const n = $("board").children[Math.max(0, Math.min(3, to)) * 4 + (+cell.dataset.c)];
+      if (n) n.focus();
+      e.preventDefault();
+    } else if (k === "Enter" && !cell) { finish(); e.preventDefault(); }
+    return;
+  }
   if (/^[a-zA-Z]$/.test(k)) {
     if (S.staged.length >= 4) return;
     const ch = k.toLowerCase();
@@ -1319,7 +1441,7 @@ function homeScreenCard() {
    28 Sept 2026: rearranging the rack. 10 Oct 2026: tiles go straight onto the
    board and any row can be aimed at, which replaces the rack card: anyone who
    never saw that one learns about dragging from this one's last line. */
-const NEWS_KEY = "hexadec-news-board";
+const NEWS_KEY = "hexadec-news-arrange";
 function newsCard(returning) {
   if (S.ended || navigator.webdriver) return;
   try {
@@ -1330,16 +1452,12 @@ function newsCard(returning) {
   $("cardBody").innerHTML = `
     <div class="news">
       <span class="newtag">NEW</span>
-      <h1>Straight on the board</h1>
-      <p>Tap a tile and it goes straight onto the grid. Tap any empty row to put
-      your word there instead. Taking a word back no longer moves the others.</p>
-      <div class="nbdemo" aria-hidden="true">
-        <div class="nbrow nbr1"><i></i><i></i><i></i><i></i></div>
-        <div class="nbrow nbr2"><i></i><i></i><i></i><i></i></div>
-        <span class="tile nb1"><span class="ch">M</span></span><span class="tile nb2"><span class="ch">E</span></span><span class="tile nb3"><span class="ch">A</span></span><span class="tile nb4"><span class="ch">T</span></span>
-        <span class="nbtap"></span>
-      </div>
-      <p class="muted">Columns read from the top, so they count once the rows above them are full.</p>
+      <h1>Shuffle your rows</h1>
+      <p>The sixteenth tile no longer ends the game. With the grid full, drag any
+      word up or down to try another order: the same words on different rows
+      catch different squares and make different columns. The score follows every
+      move.</p>
+      <p class="muted">Tap <b>Finish</b> when you're happy. The clock keeps running, so don't dawdle.</p>
       <button class="btn primary" id="btnNews">Lovely, let me at it</button>
     </div>`;
   $("overlay").classList.add("on");
@@ -1400,8 +1518,18 @@ function boot() {
   /* A backstop for the button's visibility; every interaction paints it too. */
   setInterval(() => { if (!S.ended) paintExtras(); }, 2000);
 
+  $("btnFinish").addEventListener("click", finish);
+  const board = $("board");
+  board.addEventListener("pointerdown", onBoardDown);
+  board.addEventListener("pointermove", onBoardMove, { passive: false });
+  board.addEventListener("pointerup", onBoardUp);
+  board.addEventListener("pointercancel", onBoardUp);
+  board.addEventListener("click", (e) => {
+    if (performance.now() < swallowClickUntil) { e.stopPropagation(); e.preventDefault(); }
+  }, true);
+
   if (S.ended) { finish(); }
-  else if (filledCount() === 4) { finish(); }
+  else if (filledCount() === 4) { enterArrange(); newsCard(returning); }
   else newsCard(returning);
 }
 
@@ -1464,7 +1592,7 @@ function startWatch() {
 /* Test and tooling hook, in the family style. */
 window.__hx = {
   S, E, isWord, FOUR_LIST, currentScore, placeWord, stage, unstage, takeBack, setTarget, useStuck,
-  dragging: () => !!drag, placedIds, filledCount,
+  dragging: () => !!drag, placedIds, filledCount, moveRow, inArrange,
   shareText, finish, timeBonus, penalty, finalScore, state: () => ({
     rows: filledRows().map((r) => r.word), grid: S.rows.map((r) => (r ? r.word : null)),
     target: S.target, score: currentScore().total,
