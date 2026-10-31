@@ -267,6 +267,10 @@ body.gbshow #board .cell.colword{box-shadow:inset 0 0 0 3px rgba(15,110,99,.45)}
 .btn.primary{background:var(--accent);color:#fff8ef;border-color:#a85e28;box-shadow:0 2px 0 #97521f}
 .btn[disabled]{opacity:.42;pointer-events:none}
 .btn.small{flex:0 0 auto;padding:12px 14px;letter-spacing:.06em}
+/* Give up (31 Oct 2026): quieter than its neighbour, and it goes red when it
+   is asking you to mean it. */
+.btn.quiet{background:transparent;border-color:transparent;box-shadow:none;color:var(--ink-soft);font-weight:600}
+.btn.quiet.armed{background:var(--bad);border-color:var(--bad);color:#fff6f2;animation:shake .34s}
 
 /* ---- floating score chips --------------------------------------------- */
 .chip{position:absolute;z-index:40;pointer-events:none;font-weight:700;font-size:14px;
@@ -415,6 +419,7 @@ body.iswatch #board .cell{cursor:default}
 
     <div class="row-btns" id="extraBtns" style="display:none">
       <button class="btn" id="btnStuck"><span class="bot" aria-hidden="true"><img class="gbimg" src="/guffbot.webp" alt="" width="20" height="20"></span> I'm stuck &nbsp;<span class="cost">−20</span></button>
+      <button class="btn small quiet" id="btnGiveUp" title="End the day here and see the best line">Give up</button>
     </div>
   </div>
 
@@ -434,6 +439,7 @@ body.iswatch #board .cell{cursor:default}
         <li>Columns that happen to read as a word score a bonus too, top to bottom. A full four-letter column scores double. Columns read from the top row, so they count once every row above them is filled.</li>
         <li>Finish inside five quiet minutes and you keep a point for every five seconds left, up to 60. There is no clock on screen.</li>
         <li>Properly stuck? <b>I'm stuck</b> finds you a word that still leaves a way home. Once per game, and it costs 20 points.</li>
+        <li>Had enough? <b>Give up</b> ends the day where it stands: what is on the grid scores, the clock pays nothing, and GuffBot will show you the best line.</li>
         <li>Drag the tiles in your hand to rearrange them. A quick tap still picks one.</li>
         <li>On a keyboard you can simply type the word. Backspace takes a letter back, enter places it, escape clears, and the up and down arrows move between empty rows.</li>
       </ul>

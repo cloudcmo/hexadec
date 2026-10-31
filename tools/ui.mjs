@@ -260,7 +260,7 @@ console.log("\n5. I'm stuck");
   });
   /* the button waits for GuffBot's shrug (650ms) before it goes */
   await page.waitForTimeout(800);
-  r.gone = await page.evaluate(() => getComputedStyle(document.getElementById("extraBtns")).display === "none");
+  r.gone = await page.evaluate(() => getComputedStyle(document.getElementById("btnStuck")).display === "none");
 
   ok("it appears once you start playing", r.shown);
   ok("it is labelled I'm stuck and shows the cost", /I'm stuck/.test(r.label) && /20/.test(r.label), r.label);
@@ -797,6 +797,16 @@ console.log("\n10. GuffBot plays the best line");
   ok("the card steps aside", !(await page.evaluate(() => document.getElementById("overlay").classList.contains("on"))));
   ok("GuffBot speaks", /Watch this/.test(await page.textContent("#gbsay .bubble")));
   ok("the tray is back with all sixteen tiles", (await page.$$("#tray .tile")).length === 16);
+  /* each letter stays on the board as he places it, not only once the word is down */
+  let partial = 0;
+  for (let k = 0; k < 60 && !partial; k++) {
+    await page.waitForTimeout(25);
+    partial = await page.evaluate(() => {
+      const n = document.querySelectorAll("#board .tile.pencil").length;
+      return n > 0 && n < 4 ? n : 0;
+    });
+  }
+  ok("his letters stay visible as he places them, before the word is down", partial > 0, String(partial));
   await page.waitForFunction(() => /Every point there was/.test(document.querySelector("#gbsay .bubble").textContent), null, { timeout: 15000 }).catch(() => {});
   const end = await page.evaluate(() => {
     const hx = window.__hx, { S } = hx;
@@ -843,6 +853,57 @@ console.log("\n10. GuffBot plays the best line");
   ok("reduced motion: he still reaches the maximum", r.score === r.max, JSON.stringify(r));
   ok("reduced motion: with nothing animating", r.anims === 0, String(r.anims));
   ok("reduced motion: no page errors", errors.length === 0, errors.join(" | "));
+  await page.close();
+}
+
+console.log("\n11. Give up");
+/* Ends the day short of sixteen (31 Oct 2026). Must take two presses, pay no
+   clock bonus, survive a reload, and still let GuffBot play the best line. */
+{
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(BASE, { waitUntil: "networkidle" });
+  ok("not offered before you start", await page.isHidden("#btnGiveUp"));
+  const one = await page.evaluate(() => {
+    const hx = window.__hx, { S, E } = hx;
+    const rack = S.tiles.map((t) => t.ch).join("");
+    const w = E.makeableWords(rack, hx.FOUR_LIST)[0];
+    const used = new Set();
+    for (const ch of w) { const t = S.tiles.find((x) => x.ch === ch && !used.has(x.id)); used.add(t.id); hx.stage(t.id); }
+    hx.placeWord();
+    return hx.state().score;
+  });
+  ok("offered once you have started", await page.isVisible("#btnGiveUp"));
+  await page.click("#btnGiveUp");
+  await page.waitForTimeout(100);
+  ok("the first press only asks", !(await page.evaluate(() => window.__hx.S.ended)) && /Sure/.test(await page.textContent("#btnGiveUp")));
+  await page.click("#btnGiveUp");
+  await page.waitForTimeout(400);
+  const r = await page.evaluate(() => {
+    const hx = window.__hx;
+    return { st: hx.state(), bonus: hx.timeBonus(), final: hx.finalScore(), card: document.getElementById("overlay").classList.contains("on"),
+      text: document.getElementById("cardBody").textContent.replace(/\s+/g, " "), share: hx.shareText() };
+  });
+  ok("the second press ends the day", r.st.ended && r.st.gaveUp, JSON.stringify(r.st));
+  ok("what is on the grid scores, the clock pays nothing", r.bonus === 0 && r.final === one, JSON.stringify(r));
+  ok("the card says so", r.card && /Gave up after/.test(r.text) && /stopped at 1 word\b/.test(r.text), r.text.slice(0, 200));
+  ok("and still offers GuffBot's best", /GuffBot's best/.test(r.text));
+  ok("the share text owns up", /gave up/.test(r.share) && /⬛/.test(r.share), r.share);
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(400);
+  const back = await page.evaluate(() => ({ st: window.__hx.state(), bonus: window.__hx.timeBonus(), card: document.getElementById("overlay").classList.contains("on") }));
+  ok("a given-up day survives a reload", back.st.ended && back.st.gaveUp && back.bonus === 0 && back.card, JSON.stringify(back));
+  await page.evaluate(() => window.__hx.setShowSpeed(0.1));
+  await page.click("#btnBest");
+  await page.waitForFunction(() => /Every point there was/.test((document.querySelector("#gbsay .bubble") || {}).textContent || ""), null, { timeout: 15000 }).catch(() => {});
+  const end = await page.evaluate(() => ({ score: window.__hx.state().score, max: window.__hx.S.max, say: document.querySelector("#gbsay .bubble").textContent }));
+  ok("GuffBot still plays the best line from a short grid", end.score === end.max && /before you stopped/.test(end.say), JSON.stringify(end));
+  await page.click("#btnShowDone");
+  await page.waitForTimeout(300);
+  const fin = await page.evaluate(() => window.__hx.state());
+  ok("and gives the short grid back", fin.rows.length === 1 && fin.score === one, JSON.stringify(fin));
+  ok("no page errors", errors.length === 0, errors.join(" | "));
   await page.close();
 }
 

@@ -96,6 +96,7 @@ const S = {
   running: false,
   t0: 0,
   helped: false,
+  gaveUp: false,    // stopped short of sixteen (31 Oct 2026): no clock bonus, and GuffBot shows the best
   ended: false,
   takebacks: 0,
   sent: false,
@@ -265,7 +266,9 @@ function pip(t, code) {
 function paintBoard() {
   const cells = $("board").children;
   for (let r = 0; r < 4; r++) {
-    const live = !S.ended && r === S.target;
+    /* During GuffBot's turn the day is over but he is still spelling, so his
+       letters must show as he places them (31 Oct 2026). */
+    const live = (!S.ended || !!show) && r === S.target;
     for (let c = 0; c < 4; c++) {
       const cell = cells[r * 4 + c];
       const old = cell.querySelector(".tile");
@@ -399,8 +402,11 @@ function preview() {
 /* Offered from the moment the first tile is tapped, and gone once used or once
    the game is over. The 20 points are the regulator, not the timing. */
 function paintExtras() {
+  /* The row holds I'm stuck and Give up. Both arrive with the first tap; I'm
+     stuck leaves once used, Give up stays until the grid is full. */
   $("extraBtns").style.display =
-    (!S.ended && !inArrange() && (!S.helped || stuckLeaving) && (S.running || S.ms > 0)) ? "flex" : "none";
+    (!S.ended && !inArrange() && (S.running || S.ms > 0)) ? "flex" : "none";
+  $("btnStuck").style.display = (!S.helped || stuckLeaving) ? "" : "none";
   /* Once the sixteen are down the play controls make no sense, and the end
      card can be closed. The page must still have a way back to the score. */
   const arr = inArrange();
@@ -442,6 +448,7 @@ function stopClock() {
 }
 function elapsedMs() { return S.ms + (S.running ? Date.now() - S.t0 : 0); }
 function timeBonus() {
+  if (S.gaveUp) return 0;   // the clock pays for finishing, and this is not that
   const left = Math.max(0, FULL_SECONDS - Math.floor(elapsedMs() / 1000));
   return Math.floor(left / BONUS_PER);
 }
@@ -977,6 +984,37 @@ function useStuck() {
 }
 
 /* ---------------------------------------------------------------------------
+ * Give up (31 Oct 2026)
+ *
+ * Sometimes the last four tiles spell nothing and you would rather see the
+ * answer than keep hunting. Give up ends the day where it stands: the words on
+ * the grid score, the clock pays nothing, and the end card offers GuffBot's
+ * best as usual, which is the point of it. The first press asks; a second
+ * press within a few seconds does it, so a stray thumb cannot end a game.
+ * ------------------------------------------------------------------------- */
+let giveUpArmed = 0;
+function giveUp() {
+  if (S.ended || inArrange()) return;
+  const b = $("btnGiveUp");
+  if (performance.now() > giveUpArmed) {
+    giveUpArmed = performance.now() + 3500;
+    b.classList.add("armed");
+    b.innerHTML = "Sure? Tap again";
+    setTimeout(() => {
+      if (performance.now() >= giveUpArmed - 50) { b.classList.remove("armed"); b.innerHTML = "Give up"; }
+    }, 3600);
+    return;
+  }
+  giveUpArmed = 0;
+  b.classList.remove("armed");
+  b.innerHTML = "Give up";
+  S.gaveUp = true;
+  S.staged = [];
+  S.target = null;
+  finish();
+}
+
+/* ---------------------------------------------------------------------------
  * What happened yesterday
  *
  * A daily game with no memory is a game you have no particular reason to come
@@ -1024,7 +1062,7 @@ function save() {
   try {
     localStorage.setItem(KEY(), JSON.stringify({
       v: 2, rows: S.rows.map((r) => (r ? r.ids : null)), ms: elapsedMs(),
-      helped: S.helped, ended: S.ended, takebacks: S.takebacks, order: S.order,
+      helped: S.helped, ended: S.ended, gaveUp: S.gaveUp, takebacks: S.takebacks, order: S.order,
     }));
   } catch (e) {}
 }
@@ -1056,6 +1094,7 @@ function restore() {
   if (Array.isArray(d.order) && d.order.length === 16) S.order = d.order;
   S.ms = typeof d.ms === "number" && d.ms >= 0 ? d.ms : 0;
   S.helped = !!d.helped;
+  S.gaveUp = !!d.gaveUp;
   S.takebacks = d.takebacks | 0;
   S.ended = !!d.ended;
   return true;
@@ -1091,7 +1130,7 @@ function shareArt() {
       const code = S.layout[r][c];
       const lm = code === "d" ? 2 : code === "t" ? 3 : 1;
       const v = S.rows[r] ? E.letterValue(S.rows[r].word[c]) * lm : 0;
-      line += v >= 8 ? "\u{1F7E7}" : v >= 4 ? "\u{1F7E8}" : "⬜";
+      line += !S.rows[r] ? "⬛" : v >= 8 ? "\u{1F7E7}" : v >= 4 ? "\u{1F7E8}" : "⬜";
     }
     out.push(line);
   }
@@ -1106,7 +1145,7 @@ function shareText() {
   const pct = Math.round(words / S.max * 100);
   const bits = [
     `Hexadec ${nice} · ${finalScore().toLocaleString()}`,
-    `${words} on the grid${bonus ? ` + ${bonus} on the clock` : ""}${S.helped ? ` − ${STUCK_COST} for a nudge` : ""} · ${pct}% of the best possible`,
+    `${words} on the grid${bonus ? ` + ${bonus} on the clock` : ""}${S.helped ? ` − ${STUCK_COST} for a nudge` : ""}${S.gaveUp ? " · gave up" : ""} · ${pct}% of the best possible`,
     "",
     shareArt(),
   ];
@@ -1152,6 +1191,7 @@ function showCard() {
   const best = bestOf(history);
 
   const comment =
+    S.gaveUp ? `You stopped at ${words ? filledCount() : "no"} word${filledCount() === 1 ? "" : "s"}. See what GuffBot does with the rest.` :
     pct >= 90 ? "Very nearly the best there was." :
     pct >= 78 ? "A strong line." :
     pct >= 65 ? "Better than a careful guess." :
@@ -1164,7 +1204,7 @@ function showCard() {
     <div class="bigscore">${total.toLocaleString()}</div>
     <div class="breakdown">
       <b>${words}</b> on the grid${bonus ? ` + <b>${bonus}</b> for the time left` : ""}${S.helped ? ` − <b>${STUCK_COST}</b> for a nudge` : ""}
-      <br>Finished in ${mm}:${ss}${S.takebacks ? ` · ${S.takebacks} take-back${S.takebacks > 1 ? "s" : ""}` : ""}
+      <br>${S.gaveUp ? "Gave up after" : "Finished in"} ${mm}:${ss}${S.takebacks ? ` · ${S.takebacks} take-back${S.takebacks > 1 ? "s" : ""}` : ""}
     </div>
     <div class="meter"><i style="width:${Math.min(100, pct)}%"></i></div>
     <div class="breakdown"><b>${pct}%</b> of the best possible ${S.max}.<br>${comment}</div>
@@ -1356,7 +1396,10 @@ async function guffbotShow() {
     litColumns();
     const pct = Math.round(mine / best * 100);
     say(`<b>${best.toLocaleString()}</b>. Every point there was.<br>` +
-      (mine >= best ? "And you found the lot. Take a bow." : `You found ${mine.toLocaleString()}, which is ${pct}% of it.`), true);
+      (mine >= best ? "And you found the lot. Take a bow."
+        : S.gaveUp && !mine ? "Tomorrow, eh?"
+        : S.gaveUp ? `You had ${mine.toLocaleString()} before you stopped. ${pct}% of it.`
+        : `You found ${mine.toLocaleString()}, which is ${pct}% of it.`), true);
   } catch (e) {
     console.error(e);
     endShow();
@@ -1710,6 +1753,7 @@ function boot() {
     if (performance.now() < swallowClickUntil) { e.stopPropagation(); e.preventDefault(); }
   }, true);
   $("btnStuck").addEventListener("click", useStuck);
+  $("btnGiveUp").addEventListener("click", giveUp);
   $("btnResult").addEventListener("click", finish);
   $("linkHome").addEventListener("click", (e) => { e.preventDefault(); homeScreenCard(); });
   $("btnClose").addEventListener("click", () => {
@@ -1801,11 +1845,11 @@ function startWatch() {
 window.__hx = {
   S, E, isWord, FOUR_LIST, currentScore, placeWord, stage, unstage, takeBack, setTarget, useStuck,
   dragging: () => !!drag, placedIds, filledCount, moveRow, inArrange,
-  guffbotShow, endShow, showing: () => !!show, setShowSpeed: (x) => { showSpeed = x; },
+  guffbotShow, endShow, giveUp, showing: () => !!show, setShowSpeed: (x) => { showSpeed = x; },
   shareText, finish, timeBonus, penalty, finalScore, state: () => ({
     rows: filledRows().map((r) => r.word), grid: S.rows.map((r) => (r ? r.word : null)),
     target: S.target, score: currentScore().total,
-    max: S.max, ended: S.ended, helped: S.helped, takebacks: S.takebacks,
+    max: S.max, ended: S.ended, helped: S.helped, gaveUp: S.gaveUp, takebacks: S.takebacks,
   }),
 };
 

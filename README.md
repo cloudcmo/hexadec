@@ -92,6 +92,14 @@ so there is no way to bank points from a word and then remove it. `npm run ui`
 asserts this by placing and removing the same word ten times. Saves are v2 (all
 four rows, null for empty); v1 saves from before the change still load.
 
+**Give up (31 Oct 2026).** Next to I'm stuck from the first tap. Ends the day
+where it stands: the words on the grid score, the clock pays nothing (`timeBonus`
+is zero when `S.gaveUp`), the card says "Gave up after m:ss" and offers
+GuffBot's best, which is the point of it. First press arms the button ("Sure?
+Tap again", red) for 3.5 seconds; a second press does it. Saved as `gaveUp` in
+the day's record; the share art shows empty rows as black squares and the share
+text says "gave up". `npm run ui` section 11.
+
 **GuffBot plays the best line (31 Oct 2026).** The end card's *GuffBot's best*
 button closes the card and he plays it on the real board: your tiles go back
 to the tray, his four words fly up one at a time with the usual chips, and then
