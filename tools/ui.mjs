@@ -765,6 +765,87 @@ console.log("\n9. Straight onto the board, any row");
   await page.close();
 }
 
+console.log("\n10. GuffBot plays the best line");
+/* The end card's GuffBot's best button (31 Oct 2026) closes the card and plays
+   the best line on the real board: words fly up from the tray, then the rows
+   slide into the best order. It must reach exactly the day's maximum, touch
+   nothing that is saved, and give the player their own grid back. Run at a
+   tenth of the pace so the suite does not sit through the theatre. */
+{
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(BASE, { waitUntil: "networkidle" });
+  const mine = await page.evaluate(() => {
+    const hx = window.__hx, { S, E } = hx;
+    const rack = S.tiles.map((t) => t.ch).join("");
+    const sol = E.findSolutions(rack, E.makeableWords(rack, hx.FOUR_LIST), 1)[0];
+    sol.forEach((w, r) => {
+      hx.setTarget(r);
+      const used = hx.placedIds();
+      for (const ch of w) { const t = S.tiles.find((x) => x.ch === ch && !used.has(x.id) && !S.staged.includes(x.id)); hx.stage(t.id); }
+      hx.placeWord();
+    });
+    hx.finish();
+    hx.setShowSpeed(0.1);
+    return { grid: hx.state().grid, score: hx.state().score, saved: localStorage.getItem("hexadec-" + S.date) };
+  });
+  await page.waitForTimeout(300);
+  ok("the card offers GuffBot's best", /GuffBot's best/.test(await page.textContent("#btnBest")));
+  await page.click("#btnBest");
+  await page.waitForTimeout(300);
+  ok("the card steps aside", !(await page.evaluate(() => document.getElementById("overlay").classList.contains("on"))));
+  ok("GuffBot speaks", /Watch this/.test(await page.textContent("#gbsay .bubble")));
+  ok("the tray is back with all sixteen tiles", (await page.$$("#tray .tile")).length === 16);
+  await page.waitForFunction(() => /Every point there was/.test(document.querySelector("#gbsay .bubble").textContent), null, { timeout: 15000 }).catch(() => {});
+  const end = await page.evaluate(() => {
+    const hx = window.__hx, { S } = hx;
+    return { showing: hx.showing(), score: hx.state().score, max: S.max,
+      say: document.querySelector("#gbsay .bubble").textContent, saved: localStorage.getItem("hexadec-" + S.date),
+      tray: getComputedStyle(document.getElementById("tray")).display, floating: document.querySelectorAll(".tile.floating").length };
+  });
+  ok("he reaches exactly the day's maximum", end.score === end.max, `${end.score} vs ${end.max}`);
+  ok("and says so", /Every point there was/.test(end.say) && new RegExp(String(mine.score)).test(end.say), end.say);
+  ok("nothing was saved while he played", end.saved === mine.saved);
+  ok("the empty tray is tucked away and no tile is left in flight", end.tray === "none" && end.floating === 0, JSON.stringify(end));
+  await page.click("#btnShowDone");
+  await page.waitForTimeout(300);
+  const back = await page.evaluate(() => ({ showing: window.__hx.showing(), grid: window.__hx.state().grid, score: window.__hx.state().score,
+    card: document.getElementById("overlay").classList.contains("on") }));
+  ok("your own grid comes back", back.grid.join() === mine.grid.join() && back.score === mine.score, JSON.stringify(back));
+  ok("and the card reopens", back.card && !back.showing);
+  ok("no page errors", errors.length === 0, errors.join(" | "));
+  await page.close();
+}
+{
+  /* Less movement: he still gets there, with nothing animating. */
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: "reduce" });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(BASE, { waitUntil: "networkidle" });
+  await page.evaluate(() => {
+    const hx = window.__hx, { S, E } = hx;
+    const rack = S.tiles.map((t) => t.ch).join("");
+    const sol = E.findSolutions(rack, E.makeableWords(rack, hx.FOUR_LIST), 1)[0];
+    sol.forEach((w, r) => {
+      hx.setTarget(r);
+      const used = hx.placedIds();
+      for (const ch of w) { const t = S.tiles.find((x) => x.ch === ch && !used.has(x.id) && !S.staged.includes(x.id)); hx.stage(t.id); }
+      hx.placeWord();
+    });
+    hx.finish();
+    hx.setShowSpeed(0.1);
+  });
+  await page.waitForTimeout(300);
+  await page.click("#btnBest");
+  await page.waitForFunction(() => /Every point there was/.test(document.querySelector("#gbsay .bubble").textContent), null, { timeout: 5000 }).catch(() => {});
+  const r = await page.evaluate(() => ({ score: window.__hx.state().score, max: window.__hx.S.max, anims: document.getAnimations().length }));
+  ok("reduced motion: he still reaches the maximum", r.score === r.max, JSON.stringify(r));
+  ok("reduced motion: with nothing animating", r.anims === 0, String(r.anims));
+  ok("reduced motion: no page errors", errors.length === 0, errors.join(" | "));
+  await page.close();
+}
+
 await browser.close();
 console.log(failures ? `\n${failures} failure(s)\n` : "\nAll checks passed\n");
 process.exit(failures ? 1 : 0);

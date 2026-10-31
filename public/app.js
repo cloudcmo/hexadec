@@ -405,7 +405,8 @@ function paintExtras() {
      card can be closed. The page must still have a way back to the score. */
   const arr = inArrange();
   $("verdict").style.display = S.ended ? "none" : "";
-  $("tray").style.display = (S.ended || arr) ? "none" : "";
+  /* During GuffBot's turn the tray shows his hand, until it is empty. */
+  $("tray").style.display = ((S.ended && !show) || arr || (show && filledCount() === 4)) ? "none" : "";
   $("playBtns").style.display = (S.ended || arr) ? "none" : "";
   $("arrangeBtns").style.display = arr ? "flex" : "none";
   $("doneBtns").style.display = S.ended ? "flex" : "none";
@@ -1177,7 +1178,7 @@ function showCard() {
     ${downs.length ? `<div class="muted" style="margin-top:6px">${downs.length} column word${downs.length > 1 ? "s" : ""}${fulls.length ? `, ${fulls.length} of them the full four` : ""}.</div>` : '<div class="muted" style="margin-top:6px">No columns came good. That is where the points hide.</div>'}
     <div class="row-btns" style="margin-top:14px">
       <button class="btn primary" id="btnShare">Share score</button>
-      <button class="btn small" id="btnBest">Best line</button>
+      <button class="btn small" id="btnBest"><span class="bot" aria-hidden="true"><img class="gbimg" src="/guffbot.webp" alt="" width="20" height="20"></span> GuffBot's best</button>
     </div>
     <div id="bestOut"></div>
     <div id="endBar"></div>
@@ -1203,7 +1204,7 @@ function showCard() {
      its own, so one failing leaves the score on screen. */
   const extras = [
     () => $("btnShare").addEventListener("click", doShare),
-    () => $("btnBest").addEventListener("click", revealBest),
+    () => $("btnBest").addEventListener("click", guffbotShow),
     () => $("subForm").addEventListener("submit", subscribe),
     () => paintDayStats(),
     () => barToEnd(),
@@ -1213,24 +1214,231 @@ function showCard() {
   paintExtras();
 }
 
-/* The best line is recomputed here rather than shipped in days.js, because a
-   solution sitting in the page source is a solution somebody will read. It is
-   an exhaustive search, so it runs once, on demand, after the game is over. */
-function revealBest() {
-  const out = $("bestOut");
-  out.innerHTML = '<div class="trimnote">Working it out…</div>';
-  setTimeout(() => {
-    const rack = S.tiles.map((t) => t.ch).join("");
-    const list = E.makeableWords(rack, FOUR_LIST);
-    const { best, bestWords } = E.maximise(rack, list, S.layout, isWord);
-    if (!bestWords) { out.innerHTML = ""; return; }
-    const sc = E.scorePlacement(bestWords, S.layout, isWord);
-    out.innerHTML = `<div class="wordlist" style="margin-top:10px">The best line was
-      ${bestWords.map((w) => `<code>${w.toUpperCase()}</code>`).join(" ")} for <b>${best}</b>` +
-      (sc.rows.some((r) => r.downs.length)
-        ? ` <span class="muted">(${sc.rows.flatMap((r) => r.downs).map((d) => "↓" + d.word.toUpperCase()).join(" ")})</span>`
-        : "") + `</div>`;
-  }, 30);
+/* ---------------------------------------------------------------------------
+ * GuffBot's turn (31 Oct 2026)
+ *
+ * The best line used to be a line of plain text on the end card. Now the card
+ * steps aside and GuffBot plays it on the real board: your tiles go back to the
+ * tray, his four words fly up one at a time with the usual chips, and then he
+ * slides the rows into the best order while the score climbs. He says ooh and
+ * aah as he goes. Nothing he does is saved or reported; when he is done your
+ * own grid comes back and the card reopens.
+ *
+ * Why the order matters: the search finds the four words AND the row order
+ * that pays most. So he lands them in the WORST order first and tidies up,
+ * which is the part that shows where the hidden points were.
+ * ------------------------------------------------------------------------- */
+let show = null;           // { rows, order, best, bestWords, timers:[] }
+let showSpeed = 1;         // tests run it at a fraction of the pace
+
+const OOHS = ["Ooh.", "Aah.", "Ooh, nice.", "Mm, lovely.", "Oh I say.", "Aah, look at that."];
+const sayLine = (() => { let i = Math.floor(Math.random() * OOHS.length); return () => OOHS[i++ % OOHS.length]; })();
+
+function wait(ms) {
+  return new Promise((res) => {
+    const t = setTimeout(res, ms * showSpeed);
+    if (show) show.timers.push(t);
+  });
+}
+
+function say(text, big) {
+  let b = $("gbsay");
+  if (!b) {
+    b = el("div", "gbsay");
+    b.id = "gbsay";
+    b.innerHTML = `<img class="gbface" src="/guffbot.webp" alt="GuffBot" width="44" height="44"><div class="bubble" aria-live="polite"></div>`;
+    $("boardwrap").before(b);
+  }
+  b.style.display = "flex";
+  const bub = b.querySelector(".bubble");
+  bub.innerHTML = text;
+  bub.classList.toggle("big", !!big);
+  if (!CALM.matches) {
+    const face = b.querySelector(".gbface");
+    face.classList.remove("nod"); void face.offsetWidth; face.classList.add("nod");
+  }
+}
+
+/* The row order that pays LEAST for these four words, so the tidy-up has
+   somewhere to go. Falls back to the best order reversed if they all tie. */
+function worstOrder(words) {
+  const perms = (a) => a.length <= 1 ? [a] : a.flatMap((x, i) => perms([...a.slice(0, i), ...a.slice(i + 1)]).map((p) => [x, ...p]));
+  let worst = null, low = Infinity;
+  for (const p of perms(words)) {
+    const s = E.scorePlacement(p, S.layout, isWord).total;
+    if (s < low) { low = s; worst = p; }
+  }
+  if (!worst || worst.join() === words.join()) worst = words.slice().reverse();
+  return worst;
+}
+
+async function guffbotShow() {
+  if (show || !S.ended || S.watch) return;
+  const rack = S.tiles.map((t) => t.ch).join("");
+  const list = E.makeableWords(rack, FOUR_LIST);
+  const { best, bestWords } = E.maximise(rack, list, S.layout, isWord);
+  if (!bestWords) return;
+  const mine = currentScore().total;
+
+  show = { rows: S.rows, order: S.order, best, bestWords, timers: [] };
+  $("overlay").classList.remove("on");
+  emptyRows();
+  S.target = null;
+  S.staged = [];
+  S.order = S.tiles.map((t) => t.id);
+  document.body.classList.add("gbshow");
+  repaint();
+  $("board").style.position = "relative";
+  let btn = $("btnShowDone");
+  if (!btn) {
+    btn = el("button", "btn small", "Back to my score");
+    btn.id = "btnShowDone";
+    btn.addEventListener("click", endShow);
+    $("doneBtns").appendChild(btn);
+  }
+  $("doneBtns").style.display = "flex";
+  $("btnResult").style.display = "none";
+  btn.style.display = "";
+
+  const calm = CALM.matches;
+  const start = worstOrder(bestWords);
+
+  try {
+    say("Right. Watch this.");
+    await wait(calm ? 300 : 1100);
+
+    /* the four words, worst order first */
+    for (let r = 0; r < 4; r++) {
+      const word = start[r];
+      const before = currentScore();
+      for (const ch of word) {
+        const used = placedIds();
+        const t = S.tiles.find((x) => x.ch === ch && !used.has(x.id) && !S.staged.includes(x.id));
+        if (!t) throw new Error("tile missing");
+        if (!calm) await flyToBoard(t.id, r, S.staged.length);
+        S.staged.push(t.id);
+        S.target = r;
+        paintTray(); paintBoard();
+        if (!calm) await wait(210);
+      }
+      S.rows[r] = { word, ids: S.staged.slice() };
+      S.staged = [];
+      S.target = null;
+      repaint();
+      if (!calm) {
+        celebrate(r, before);
+        const downs = (currentScore().rows[r] || { downs: [] }).downs.length;
+        say(downs ? `${sayLine()} A column.` : sayLine());
+        await wait(downs ? 1500 : 1000);
+      }
+    }
+
+    /* the tidy-up: rows slide into the best order, one at a time */
+    if (currentScore().total !== best) {
+      say("Now then. Let's get these in order.");
+      await wait(calm ? 200 : 1300);
+      for (let i = 0; i < 4; i++) {
+        const j = S.rows.findIndex((row) => row && row.word === bestWords[i]);
+        if (j === i) continue;
+        const was = currentScore().total;
+        if (calm) {
+          const rows = S.rows.slice(); const [row] = rows.splice(j, 1); rows.splice(i, 0, row); S.rows = rows;
+          repaint();
+        } else {
+          await slideRow(j, i);
+        }
+        const now = currentScore().total;
+        const gain = now - was;
+        say(`${sayLine()} <span class="${gain >= 0 ? "pts" : "neg"}">${gain >= 0 ? "+" : ""}${gain}</span>`);
+        await wait(calm ? 150 : 1300);
+      }
+    }
+    litColumns();
+    const pct = Math.round(mine / best * 100);
+    say(`<b>${best.toLocaleString()}</b>. Every point there was.<br>` +
+      (mine >= best ? "And you found the lot. Take a bow." : `You found ${mine.toLocaleString()}, which is ${pct}% of it.`), true);
+  } catch (e) {
+    console.error(e);
+    endShow();
+  }
+}
+
+/* A tile lifts out of the tray and flies to its square. */
+function flyToBoard(id, r, c) {
+  return new Promise((res) => {
+    const from = $("tray").querySelector(`.tile[data-id="${id}"]`);
+    const cell = $("board").children[r * 4 + c];
+    if (!from || !cell) return res();
+    const a = from.getBoundingClientRect(), b = cell.getBoundingClientRect();
+    const f = tileNode(tileById(id), "floating up");
+    f.setAttribute("aria-hidden", "true");
+    f.style.left = a.left + "px"; f.style.top = a.top + "px";
+    f.style.width = a.width + "px"; f.style.height = a.height + "px";
+    f.style.transition = "none";
+    document.body.appendChild(f);
+    from.style.visibility = "hidden";
+    const anim = f.animate([
+      { transform: "translate(0,0) scale(1) rotate(0deg)" },
+      { transform: `translate(${(b.left - a.left) * 0.5}px, ${(b.top - a.top) * 0.5 - 30}px) scale(1.25) rotate(${c % 2 ? 8 : -8}deg)`, offset: 0.55 },
+      { transform: `translate(${b.left - a.left}px, ${b.top - a.top}px) scale(${b.width / a.width}) rotate(0deg)` },
+    ], { duration: 380 * showSpeed, easing: "cubic-bezier(.3,.9,.4,1)", fill: "forwards" });
+    anim.onfinish = () => { f.remove(); res(); };
+  });
+}
+
+/* Row j slides to seat i; the rows between shuffle to make room. FLIP on the
+   tiles, with the moving row lifted and the others gliding. */
+function slideRow(j, i) {
+  return new Promise((res) => {
+    const cells = $("board").children;
+    const before = new Map();
+    for (let k = 0; k < 16; k++) {
+      const t = cells[k].querySelector(".tile");
+      if (t) before.set(t.dataset.id, t.getBoundingClientRect());
+    }
+    const moving = new Set((S.rows[j] || { ids: [] }).ids.map(String));
+    const rows = S.rows.slice(); const [row] = rows.splice(j, 1); rows.splice(i, 0, row); S.rows = rows;
+    repaint();
+    let n = 0, done = 0;
+    for (let k = 0; k < 16; k++) {
+      const t = cells[k].querySelector(".tile");
+      if (!t) continue;
+      const a = before.get(t.dataset.id); if (!a) continue;
+      const b = t.getBoundingClientRect();
+      const dy = a.top - b.top;
+      if (!dy) continue;
+      n++;
+      const lift = moving.has(t.dataset.id);
+      t.style.zIndex = lift ? 5 : 1;
+      const an = t.animate(lift ? [
+        { transform: `translateY(${dy}px) scale(1)`, boxShadow: "0 1px 0 #d9c7a6,0 2px 4px rgba(70,45,20,.26)" },
+        { transform: `translateY(${dy * 0.5}px) scale(1.08)`, boxShadow: "0 6px 0 #d9c7a6,0 16px 22px rgba(70,45,20,.3)", offset: 0.5 },
+        { transform: "translateY(0) scale(1)", boxShadow: "0 1px 0 #d9c7a6,0 2px 4px rgba(70,45,20,.26)" },
+      ] : [
+        { transform: `translateY(${dy}px)` }, { transform: "translateY(0)" },
+      ], { duration: (lift ? 620 : 480) * showSpeed, easing: "cubic-bezier(.25,1.1,.4,1)", delay: (lift ? 0 : 80) * showSpeed, fill: "backwards" });
+      an.onfinish = () => { t.style.zIndex = ""; if (++done === n) res(); };
+    }
+    if (!n) res();
+  });
+}
+
+function endShow() {
+  if (!show) return;
+  for (const t of show.timers) clearTimeout(t);
+  for (const f of document.querySelectorAll(".tile.floating")) f.remove();
+  S.rows = show.rows;
+  S.order = show.order;
+  S.staged = [];
+  S.target = null;
+  show = null;
+  document.body.classList.remove("gbshow");
+  const b = $("gbsay"); if (b) b.style.display = "none";
+  const btn = $("btnShowDone"); if (btn) btn.style.display = "none";
+  $("btnResult").style.display = "";
+  for (const c of $("board").children) c.classList.remove("colword");
+  repaint();
+  showCard();
 }
 
 /* The day's average, from the Worker's own /api/day. Aggregates only, cached a
@@ -1593,6 +1801,7 @@ function startWatch() {
 window.__hx = {
   S, E, isWord, FOUR_LIST, currentScore, placeWord, stage, unstage, takeBack, setTarget, useStuck,
   dragging: () => !!drag, placedIds, filledCount, moveRow, inArrange,
+  guffbotShow, endShow, showing: () => !!show, setShowSpeed: (x) => { showSpeed = x; },
   shareText, finish, timeBonus, penalty, finalScore, state: () => ({
     rows: filledRows().map((r) => r.word), grid: S.rows.map((r) => (r ? r.word : null)),
     target: S.target, score: currentScore().total,

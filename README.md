@@ -92,6 +92,18 @@ so there is no way to bank points from a word and then remove it. `npm run ui`
 asserts this by placing and removing the same word ten times. Saves are v2 (all
 four rows, null for empty); v1 saves from before the change still load.
 
+**GuffBot plays the best line (31 Oct 2026).** The end card's *GuffBot's best*
+button closes the card and he plays it on the real board: your tiles go back
+to the tray, his four words fly up one at a time with the usual chips, and then
+he slides the rows into the best order while the score climbs, saying ooh and
+aah as he goes. He lands the words in the WORST order first so the tidy-up has
+somewhere to go, which is the part that shows where the hidden points were.
+Nothing is saved or reported; *Back to my score* restores your grid and reopens
+the card. The best line is still searched on demand (`E.maximise`), never
+shipped in days.js. `npm run ui` section 10 runs it at a tenth of the pace and
+checks it reaches exactly the day's maximum. Under reduced motion he places the
+finished grid in one go.
+
 **The clock** is five minutes, hidden, started on the first tap and paused when
 the tab is. What is left of it scores **one point per five seconds**, so the
 bonus tops out at 60 against a grid score of 100 to 250.
@@ -149,7 +161,7 @@ tiles, a layout index, the maximum, and par. About 12KB for 400 days.
 
 Deliberately **not** shipped: the four words the day was cut from, and the line
 that achieves the maximum. Both would be sitting in the page source. When the
-end card offers *Best line*, it recomputes it from the same dictionary the
+end card offers *GuffBot's best*, it recomputes it from the same dictionary the
 player was playing against.
 
 ### ⚠️ Regenerate days.js after any rules change
