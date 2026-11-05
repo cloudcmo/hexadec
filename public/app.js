@@ -1247,6 +1247,7 @@ function showCard() {
     () => $("btnBest").addEventListener("click", guffbotShow),
     () => $("subForm").addEventListener("submit", subscribe),
     () => paintDayStats(),
+    () => paintBar(),
     () => barToEnd(),
     () => tickNext(),
   ];
@@ -1555,9 +1556,32 @@ function report() {
   paintBar();
 }
 
+/* The bar is drawn once per page view: on the finish, and (5 Nov 2026) when a finished
+   day is reopened. Until then a reopened day showed the score card with no bar at all,
+   and since the day was played the bar's own "All games" button stayed away too, so
+   there was no way to the other games, which a home-screen app has no other way out of.
+   The bar's script loads last and from another site, so wait for it rather than give up. */
+let barPainted = false;
+function whenGuffBar(fn) {
+  if (window.GuffBar) { fn(); return; }
+  let done = false;
+  const go = () => { if (!done) { done = true; fn(); } };
+  const tag = document.querySelector('script[src*="guff-bar.js"]');
+  if (tag) { tag.addEventListener("load", go, { once: true }); tag.addEventListener("error", go, { once: true }); }
+  window.addEventListener("load", go, { once: true });
+}
 function paintBar() {
   const slot = $("guffbar-slot");
-  if (!slot) return;
+  if (!slot || S.watch) return;
+  if (!window.GuffBar) {
+    whenGuffBar(() => {
+      if (window.GuffBar) paintBar();
+      else slot.innerHTML = '<div class="trimnote">(The Guff bar and daily league appear here on the live site.)</div>';
+    });
+    return;
+  }
+  if (barPainted) return;
+  barPainted = true;
   const words = currentScore().total;
   const total = finalScore();
   const pct = Math.round(words / S.max * 100);
@@ -1572,8 +1596,6 @@ function paintBar() {
       // the league needs to draw the board again. Only when the grid is whole.
       replay: filledCount() === 4 ? { v: 1, rows: S.rows.map((r) => r.ids) } : undefined,
     });
-  } else if (!window.GuffBar) {
-    slot.innerHTML = '<div class="trimnote">(The Guff bar and daily league appear here on the live site.)</div>';
   }
 }
 
